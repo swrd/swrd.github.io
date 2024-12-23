@@ -10,9 +10,9 @@
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
-<meta name="description" content="本人硬件攻城狮一枚，会用点[micropython](https://micropython.org/)写嵌入式代码，平时也喜欢折腾网站，学一点前端知识。">
+<meta name="description" content="本人DBA一枚，熟悉数据库的运维，也从事过中间件和大数据的运维。">
 <meta property="og:title" content="关于">
-<meta property="og:description" content="本人硬件攻城狮一枚，会用点[micropython](https://micropython.org/)写嵌入式代码，平时也喜欢折腾网站，学一点前端知识。">
+<meta property="og:description" content="本人DBA一枚，熟悉数据库的运维，也从事过中间件和大数据的运维。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://swrd.github.io/about.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
@@ -73,14 +73,17 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </div>
 </div>
     <div id="content">
-<div class="markdown-body" id="postBody"><p>本人硬件攻城狮一枚，会用点<a href="https://micropython.org/" rel="nofollow">micropython</a>写嵌入式代码，平时也喜欢折腾网站，学一点前端知识。</p>
+<div class="markdown-body" id="postBody"><p>本人DBA一枚，熟悉数据库的运维，也从事过中间件和大数据的运维。日常以研究PG为主，欢迎大家的关注。</p>
+<p>技能清单</p>
 <ul>
-<li>2012年的第一个域名<code class="notranslate">djydiy.com</code>（弃用），服务器用的新浪的SAE。</li>
-<li>2015年注册域名<code class="notranslate">meekdai.com</code>,服务器用<code class="notranslate">Hostker</code>，很长一段时间用<code class="notranslate">卜卜口</code>大佬的<a href="https://github.com/itorr/imouto">imouto</a>框架</li>
-<li>2019年转用<a href="https://typecho.org/" rel="nofollow">Typecho</a>博客框架，并且购买了<a href="https://get233.com/archives/mirages-intro.html" rel="nofollow">Mirages</a>主题</li>
-<li>2020年购买了阿里云的ECS，新用户3年比较便宜</li>
-<li>2023年暑假开始做<a href="https://github.com/Meekdai/Gmeek">Gmeek</a>这个All in Github的开源项目</li>
-<li>2024年在一年之后<a href="https://github.com/Meekdai/Gmeek">Gmeek</a> Star数量<code class="notranslate">1.5K</code>，有<code class="notranslate">1.8K</code>的仓库使用Gmeek创建了博客。同时启用了插件功能</li>
+<li>数据库：PG/MySQL/Redis/MongoDB/TiDB/Pika</li>
+<li>中间件：Kafka/ES/RocketMQ</li>
+<li>大数据：Hadoop/Hbase/Spark</li>
+<li>编程语言：C++/Go/Vue/Shell</li>
+</ul>
+<p>项目：</p>
+<ul>
+<li>数据库管理平台：实现日常数据库运维操作的自动化</li>
 </ul></div>
 <div style="font-size:small;margin-top:8px;float:right;"></div>
 
@@ -140,7 +143,11 @@ console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 
 <script>
 document.getElementById("pathHome").setAttribute("d",IconList["home"]);
 document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
-
+cmButton=document.getElementById("cmButton");
+    span=document.createElement("span");
+    span.setAttribute("class","Counter");
+    span.innerHTML="1";
+    cmButton.appendChild(span);
 
 
 function openComments(){
