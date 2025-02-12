@@ -171,7 +171,9 @@ DETAIL:  Could not open file <span class="pl-s"><span class="pl-pds">"</span>pg_
 <span class="pl-k">WHERE</span> id <span class="pl-k">=</span> <span class="pl-c1">1</span>;</pre></div>
 <p>之后，表可以无任何错误的执行vacuum，这将删除损坏的数据。注意：大批量的更新会导致大量膨胀。因此，只处理损坏的行。</p>
 <h2>结论</h2>
-<p>人们经常报告错误“从 relfrozenxid 之前找到 xmin...”，这让我认为 PostgreSQL 可能存在一个数据损坏的 bug。我们已经看到了这个错误的含义，并且我已经向你展示了三种处理问题的方法。这些方法都不是没有缺点，所以请仔细选择你的方法。</p></div>
+<p>人们经常报告错误“从 relfrozenxid 之前找到 xmin...”，这让我认为 PostgreSQL 可能存在一个数据损坏的 bug。我们已经看到了这个错误的含义，并且我已经向你展示了三种处理问题的方法。这些方法都不是没有缺点，所以请仔细选择你的方法。</p>
+<p>翻译自：<br>
+<a href="https://www.cybertec-postgresql.com/en/postgresql-found-xmin-from-before-relfrozenxid/" rel="nofollow">https://www.cybertec-postgresql.com/en/postgresql-found-xmin-from-before-relfrozenxid/</a></p></div>
 <div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>

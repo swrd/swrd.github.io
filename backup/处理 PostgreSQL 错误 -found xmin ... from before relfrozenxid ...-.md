@@ -137,3 +137,7 @@ WHERE id = 1;
 ## 结论
 
 人们经常报告错误“从 relfrozenxid 之前找到 xmin...”，这让我认为 PostgreSQL 可能存在一个数据损坏的 bug。我们已经看到了这个错误的含义，并且我已经向你展示了三种处理问题的方法。这些方法都不是没有缺点，所以请仔细选择你的方法。
+
+
+翻译自：
+https://www.cybertec-postgresql.com/en/postgresql-found-xmin-from-before-relfrozenxid/
