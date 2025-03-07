@@ -1,5 +1,16 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Thu, 20 Feb 2025 07:25:49 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>PG参数maintenance_work_mem解析</title><link>https://swrd.github.io/post/PG-can-shu-maintenance_work_mem-jie-xi.html</link><description>## PG maintenance_work_mem介绍
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Fri, 07 Mar 2025 09:44:21 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>PG参数autovacuum_naptime解析</title><link>https://swrd.github.io/post/PG-can-shu-autovacuum_naptime-jie-xi.html</link><description>
+## PG autovacuum_naptime 介绍
+
+autovacuum_naptime 参数官方文档描述如下：
+
+```yaml
+Specifies the minimum delay between autovacuum runs on any given database. In each round the daemon examines the database and issues VACUUM and ANALYZE commands as needed for tables in that database. If this value is specified without units, it is taken as seconds. The default is one minute (1min). This parameter can only be set in the postgresql.conf file or on the server command line.
+```
+
+## autovacuum_naptime 源码分析
+
+根据官方文档感觉了解总是不彻底，下面根据代码分析一下该参数。</description><guid isPermaLink="true">https://swrd.github.io/post/PG-can-shu-autovacuum_naptime-jie-xi.html</guid><pubDate>Fri, 07 Mar 2025 09:42:34 +0000</pubDate></item><item><title>PG参数maintenance_work_mem解析</title><link>https://swrd.github.io/post/PG-can-shu-maintenance_work_mem-jie-xi.html</link><description>## PG maintenance_work_mem介绍
 
 PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_mem，如果没有设置autovacuum_work_mem，则使用maintenance_work_mem的设置。</description><guid isPermaLink="true">https://swrd.github.io/post/PG-can-shu-maintenance_work_mem-jie-xi.html</guid><pubDate>Thu, 20 Feb 2025 07:25:23 +0000</pubDate></item><item><title>处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."</title><link>https://swrd.github.io/post/chu-li-%20PostgreSQL%20-cuo-wu-%20-found%20xmin%20...%20from%20before%20relfrozenxid%20...-.html</link><description>
 我已经看到标题中报告的错误多次了。</description><guid isPermaLink="true">https://swrd.github.io/post/chu-li-%20PostgreSQL%20-cuo-wu-%20-found%20xmin%20...%20from%20before%20relfrozenxid%20...-.html</guid><pubDate>Wed, 12 Feb 2025 08:18:23 +0000</pubDate></item><item><title>细说vacuum的truncate操作</title><link>https://swrd.github.io/post/xi-shuo-vacuum-de-truncate-cao-zuo.html</link><description>## 引入&#13;
