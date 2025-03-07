@@ -457,7 +457,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* the minimum allowed time between two awakenings of the launcher */</span>
 <span class="pl-k">#define</span> <span class="pl-c1">MIN_AUTOVAC_SLEEPTIME</span> 100.0 <span class="pl-c">/* milliseconds */</span>
 <span class="pl-k">#define</span> <span class="pl-c1">MAX_AUTOVAC_SLEEPTIME</span> 300	<span class="pl-c">/* seconds */</span></pre></div>
-<h2>总结:</h2>
+<h2>总结</h2>
 <ul>
 <li>
 <p>autovacuum_naptime 的含义并不是间隔多久后执行vacuum/analyze达到条件表的频率，而是检查是否存在需要vacuum或analyze表的频率，如果没有则直接退出</p>
@@ -479,7 +479,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <p>对于数据库比较多的实例，可能会出现autovacuum launcher进程CPU飙升的情况，如果数据库实例并不活跃，没有多少需要执行vacuum或analyze的表可以将 autovacuum_naptime  调大一些</p>
 </li>
 </ul>
-<h2>参考：</h2>
+<h2>参考</h2>
 <p>PG 14.4/autovacuum.c/AutoVacLauncherMain</p>
 <p>PG 14.4/autovacuum.c/launcher_determine_sleep</p>
 <p>PG 14.4/autovacuum.c/rebuild_database_list</p>

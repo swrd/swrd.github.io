@@ -391,7 +391,7 @@ autovacuum_naptime 参数是1min，官方文档中并没有限制该参数的范
 #define MAX_AUTOVAC_SLEEPTIME 300	/* seconds */
 ```
 
-## 总结:
+## 总结
 
 - autovacuum_naptime 的含义并不是间隔多久后执行vacuum/analyze达到条件表的频率，而是检查是否存在需要vacuum或analyze表的频率，如果没有则直接退出
 
@@ -408,7 +408,7 @@ autovacuum_naptime 参数是1min，官方文档中并没有限制该参数的范
 
   
 
-## 参考：
+## 参考
 
 PG 14.4/autovacuum.c/AutoVacLauncherMain
 
