@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    <script src='https://blog.meekdai.com/Gmeek/plugins/GmeekVercount.js'></script>
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/5057571?s=96&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="## 一、`wal_log_hints`参数作用
+
+### （一）Hint bits机制概述
+
+在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。">
+<meta property="og:title" content="pg_rewind为什么需要开启 wal_log_hins">
+<meta property="og:description" content="## 一、`wal_log_hints`参数作用
+
+### （一）Hint bits机制概述
+
+在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://swrd.github.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-%20wal_log_hins.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<title>pg_rewind为什么需要开启 wal_log_hins</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">pg_rewind为什么需要开启 wal_log_hins</h1>
+<div class="title-right">
+    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/10" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h2>一、<code class="notranslate">wal_log_hints</code>参数作用</h2>
+<h3>（一）Hint bits机制概述</h3>
+<p>在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。具体而言，Hint bits位于元组的<code class="notranslate">infomask</code>里，仅占2个BIT位，主要用于缓存事务状态信息。当系统检查元组可见性时，会在元组头部设置这些hint bits，这样在后续操作中，就可以避免查询pg_xact，从而显著提高系统性能。需要强调的是，设置hint bits不会影响数据的正确性，纯粹是一种性能优化手段。</p>
+<pre class="notranslate"><code class="notranslate">/* heapam_visibility.c
+ *	  Tuple visibility rules for tuples stored in heap.
+ *
+ * NOTE: all the HeapTupleSatisfies routines will update the tuple's
+ * "hint" status bits if we see that the inserting or deleting transaction
+ * has now committed or aborted (and it is safe to set the hint bits).
+ * If the hint bits are changed, MarkBufferDirtyHint is called on
+ * the passed-in buffer.  The caller must hold not only a pin, but at least
+ * shared buffer content lock on the buffer containing the tuple.
+*/
+</code></pre>
+<h3>（二）Hint bits的具体定义</h3>
+<p>Hint bits通过元组头部的<code class="notranslate">infomask</code>中的特定位来表示tuple的事务状态，具体定义如下：</p>
+<pre class="notranslate"><code class="notranslate">src/include/access/htup_details.h  
+#define HEAP_XMIN_COMMITTED             0x0100  /* t_xmin committed 256 */  
+#define HEAP_XMIN_INVALID               0x0200  /* t_xmin invalid/aborted 512  */  
+#define HEAP_XMAX_COMMITTED             0x0400  /* t_xmax committed 1024  */  
+#define HEAP_XMAX_INVALID               0x0800  /* t_xmax invalid/aborted 2048 */  
+</code></pre>
+<p>其中，<code class="notranslate">t_xmin</code>和<code class="notranslate">t_xmax</code>分别代表插入和删除该元组的事务ID。当对应的位被设置时，就表明相应事务的状态（已提交或已中止）。</p>
+<h3>（三）事务状态查询机制</h3>
+<p>Hint bits中仅记录提交成功或失败的事务。对于正在进行的事务，系统可以通过查询<code class="notranslate">pg_xact</code>或使用快照来判断其状态。在PostgreSQL的<code class="notranslate">pg_xact</code>中，定义了四种事务状态：</p>
+<pre class="notranslate"><code class="notranslate">src/include/access/clog.h
+#define TRANSACTION_STATUS_IN_PROGRESS		0x00
+#define TRANSACTION_STATUS_COMMITTED		0x01
+#define TRANSACTION_STATUS_ABORTED			0x02
+#define TRANSACTION_STATUS_SUB_COMMITTED	0x03
+</code></pre>
+<h2>二、<code class="notranslate">pg_rewind</code>流程详解</h2>
+<h3>（一）基本思路概述</h3>
+<p><code class="notranslate">pg_rewind</code>的主要目标是将源集群的所有文件系统级别的更改复制到目标集群，以确保两个集群的数据一致性。其基本执行流程如下：</p>
+<h3>（二）详细步骤解析</h3>
+<ol>
+<li>扫描目标集群WAL并记录变更数据块
+<ul>
+<li>从源集群和目标集群时间线分叉点之前的最后一个共同检查点开始，系统会仔细扫描目标集群的WAL记录。</li>
+<li>在扫描过程中，一旦发现某个数据块被修改，就会将其相关信息记录到<code class="notranslate">file_entry_t</code>结构体中的<code class="notranslate">pagemap</code>里。这个<code class="notranslate">pagemap</code>就像是一个“地图”，标记了所有需要关注的数据块变化情况。</li>
+</ul>
+</li>
+<li>复制变更的数据块
+<ul>
+<li>根据第一步记录的<code class="notranslate">pagemap</code>信息，系统会将所有变更的数据块从源集群精确地复制到目标集群。这一步确保了目标集群的数据在物理层面与源集群保持一致。</li>
+</ul>
+</li>
+<li>复制其他必要文件
+<ul>
+<li>除了数据块，系统还会复制其他所有相关文件，包括新的表文件、WAL日志文件、<code class="notranslate">pg_xact</code>文件以及各种配置文件。</li>
+<li>然而，有一些特定的目录和文件会被忽略，不进行复制。这些包括<code class="notranslate">pg_dynshmem/</code>、<code class="notranslate">pg_notify/</code>、<code class="notranslate">pg_replslot/</code>、<code class="notranslate">pg_serial/</code>、<code class="notranslate">pg_snapshots/</code>、<code class="notranslate">pg_stat_tmp/</code>目录，以及<code class="notranslate">backup_label</code>、<code class="notranslate">tablespace_map</code>、<code class="notranslate">pg_internal.init</code>、<code class="notranslate">postmaster.opts</code>和<code class="notranslate">postmaster.pid</code>文件，还有任何以<code class="notranslate">pgsql_tmp</code>开头的文件或目录。这是为了避免复制不必要的或可能干扰数据一致性的文件。</li>
+</ul>
+</li>
+<li>创建<code class="notranslate">backup_label</code>文件
+<ul>
+<li>在完成上述复制操作后，系统会创建一个新的<code class="notranslate">backup_label</code>文件。这个文件的作用至关重要，它为从故障转移时创建的检查点开始进行WAL重放提供了必要的信息，确保后续的数据恢复过程能够正确进行。</li>
+</ul>
+</li>
+<li>启动目标集群并应用WAL日志
+<ul>
+<li>最后，系统会启动目标集群，并应用从分叉点之前最后一个共同检查点开始的所有WAL日志记录，直到两个集群的数据完全一致。这一步是整个<code class="notranslate">pg_rewind</code>流程的关键环节，通过重放WAL日志，目标集群能够准确地更新到与源集群相同的状态。</li>
+</ul>
+</li>
+</ol>
+<h3>（三）特殊情况处理</h3>
+<p>如果两个集群已经在同一个时间线上，那么就不需要进行<code class="notranslate">rewind</code>操作。只有在两个集群的时间线发生分叉时，<code class="notranslate">pg_rewind</code>才会发挥作用，通过找到两个集群的共同祖先时间线，并确定分叉点，然后按照上述流程进行数据同步。</p>
+<h2>三、为什么需要开启<code class="notranslate">wal_log_hints</code></h2>
+<h3>（一）<code class="notranslate">pg_rewind</code>对WAL日志的要求</h3>
+<p>在使用<code class="notranslate">pg_rewind</code>时，系统要求目标服务器启用校验和（data checksums）或者设置<code class="notranslate">wal_log_hints = on</code>。如果这两个条件都不满足，系统会报错：</p>
+<pre class="notranslate"><code class="notranslate">/src/bin/pg_rewind/pg_rewind.c
+     /*
+	 * Target cluster need to use checksums or hint bit wal-logging, this to
+	 * prevent from data corruption that could occur because of hint bits.
+	 */
+	if (ControlFile_target.data_checksum_version != PG_DATA_CHECKSUM_VERSION &amp;&amp;
+		!ControlFile_target.wal_log_hints)
+	{
+		pg_fatal("target server needs to use either data checksums or \"wal_log_hints = on\"");
+	}
+</code></pre>
+<h3>（二）<code class="notranslate">wal_log_hints</code>的工作原理</h3>
+<p>开启<code class="notranslate">wal_log_hints</code>后，系统会在执行checkpoint后第一次修改hint bits时执行全页镜像（fpi）操作，将整个页面写入WAL日志。在其他情况下，hint bits的修改不会记录到WAL日志中。从代码注释来看，<code class="notranslate">wal_log_hints</code>所指的非关键性修改主要就是hint bits操作，但目前在实际应用中仅发现对hint bits有这种特殊处理。</p>
+<pre class="notranslate"><code class="notranslate">/src/backend/utils/misc/guc.c	
+	{
+		{"wal_log_hints", PGC_POSTMASTER, WAL_SETTINGS,
+			gettext_noop("Writes full pages to WAL when first modified after a checkpoint, even for a non-critical modification."),
+			NULL
+		},
+		&amp;wal_log_hints,
+		false,
+		NULL, NULL, NULL
+	},
+</code></pre>
+<h3>（三）<code class="notranslate">pg_rewind</code>依赖WAL日志记录hint bits的原因</h3>
+<p><code class="notranslate">pg_rewind</code>通过检查WAL日志来确定哪些数据块发生了变化，然后只复制这些发生变化的块。如果hint bits的修改没有记录到WAL中，<code class="notranslate">pg_rewind</code>就无法检测到这些修改。这可能会导致在重写过程中丢失这些修改，进而引发数据不一致或损坏的问题。因为<code class="notranslate">pg_rewind</code>需要确保复制后的页面在物理上完全一致，包括所有的元数据。忽略hint bits的变化可能会破坏页面内容的完整性。</p>
+<p>虽然hint bits本身不是业务数据，但它们是数据页完整性的重要组成部分。<code class="notranslate">pg_rewind</code>关注这些修改的原因主要有以下几点：</p>
+<ol>
+<li><strong>影响页面物理状态和校验和</strong>：Hint bits的变化可能会影响页面的物理状态，进而影响页面的校验和计算。如果校验和不匹配，可能会导致数据验证失败，影响系统的可靠性。</li>
+<li><strong>避免数据不一致或损坏</strong>：如前所述，忽略hint bits的变化可能导致数据不一致或损坏，这在生产环境中是不可接受的。</li>
+<li><strong>故障恢复场景的关键要求</strong>：在故障恢复场景中，确保完整的页面一致性是至关重要的。只有保证所有页面的一致性，才能确保系统在故障后能够正确恢复并正常运行。</li>
+</ol>
+<h2>四、为什么hint bits执行一次仍可满足<code class="notranslate">pg_rewind</code></h2>
+<h3>（一）<code class="notranslate">pg_rewind</code>的核心目标</h3>
+<p><code class="notranslate">pg_rewind</code>的主要目的是识别哪些页面在源集群和目标集群之间发生了变化。当一个页面的hint bits被修改时，通过记录第一次修改，<code class="notranslate">pg_rewind</code>已经能够确定这个页面需要从源集群复制到目标集群。</p>
+<h3>（二）性能优化的考量</h3>
+<ol>
+<li><strong>减少WAL体积</strong>：如果记录每一个hint bit修改，WAL日志会变得非常大。这不仅会增加磁盘I/O的开销，还可能导致WAL日志文件快速膨胀，占用大量的存储空间。通过只在checkpoint后第一次修改时写入整页，可以有效减少WAL日志的体积，提高系统的性能和可维护性。</li>
+<li><strong>Hint bits的可重建性</strong>：Hint bits本质上是缓存信息，可以在需要时重新计算。这意味着即使不记录所有的hint bit修改，系统在需要时仍然可以通过查询事务状态等信息来重新生成hint bits的值，不会影响数据的正确性和一致性。</li>
+<li><strong>第一次修改足够标识页面变更</strong>：对于<code class="notranslate">pg_rewind</code>来说，知道页面被修改过就足够了，不需要详细了解具体修改了哪些hint bits。因为<code class="notranslate">pg_rewind</code>的主要任务是确保页面的一致性，而不是精确跟踪hint bits的变化细节。</li>
+</ol>
+<h2>五、总结</h2>
+<p>PostgreSQL中的hint bits是一种用于优化事务可见性检查的重要机制，默认情况下不会记录到WAL中。而<code class="notranslate">wal_log_hints</code>参数改变了这一行为，确保hint bits的修改也被记录到WAL中，这对于<code class="notranslate">pg_rewind</code>等需要精确跟踪页面变化的工具至关重要。虽然开启<code class="notranslate">wal_log_hints</code>会增加WAL的体积，但通过只在checkpoint后第一次修改时写入整页，PostgreSQL在性能和数据一致性之间找到了一个平衡点。同时，我们也应该认识到hint bits在数据页完整性方面的重要性，以及在故障恢复场景中的关键作用。</p>
+<h2>六、参考资料</h2>
+<ul>
+<li><a href="https://www.postgresql.org/docs/14/app-pgrewind.html" rel="nofollow">https://www.postgresql.org/docs/14/app-pgrewind.html</a></li>
+<li><a href="http://mysql.taobao.org/monthly/2018/05/05/" rel="nofollow">http://mysql.taobao.org/monthly/2018/05/05/</a></li>
+<li>pg14.4/pg_rewind.c:692-700</li>
+<li>pg14.4/guc.c:1298 - 1306</li>
+<li>pg14.4/heapam_visibility.c:3-11</li>
+</ul></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>

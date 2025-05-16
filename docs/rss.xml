@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Fri, 07 Mar 2025 09:44:21 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>PG参数autovacuum_naptime解析</title><link>https://swrd.github.io/post/PG-can-shu-autovacuum_naptime-jie-xi.html</link><description>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Fri, 16 May 2025 07:52:32 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>pg_rewind为什么需要开启 wal_log_hins</title><link>https://swrd.github.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-%20wal_log_hins.html</link><description>## 一、`wal_log_hints`参数作用
+
+### （一）Hint bits机制概述
+
+在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。</description><guid isPermaLink="true">https://swrd.github.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-%20wal_log_hins.html</guid><pubDate>Fri, 16 May 2025 07:52:02 +0000</pubDate></item><item><title>PG参数autovacuum_naptime解析</title><link>https://swrd.github.io/post/PG-can-shu-autovacuum_naptime-jie-xi.html</link><description>
 ## PG autovacuum_naptime 介绍
 
 autovacuum_naptime 参数官方文档描述如下：
