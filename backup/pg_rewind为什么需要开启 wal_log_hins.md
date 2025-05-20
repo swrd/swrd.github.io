@@ -137,3 +137,5 @@ PostgreSQL中的hint bits是一种用于优化事务可见性检查的重要机�
 - pg14.4/pg_rewind.c:692-700
 - pg14.4/guc.c:1298 - 1306
 - pg14.4/heapam_visibility.c:3-11
+
+<!-- ##{"script":"<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekBSZ.js'></script>"}## -->
