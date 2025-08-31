@@ -1,0 +1,15 @@
+name: Cleanup Old Actions Runs
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每日UTC零点执行，可按需调整cron表达式
+jobs:
+  delete-old-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old runs
+        uses: yanovation/delete-old-actions@v1
+        with:
+          token: ${{ cleanup }}  # 需确保有足够权限
+          # days-ago: 30  # 删除30天前的运行记录
+          keep-latest: 5   # 可选：保留最近5次运行，与days-ago二选一
+          # dry-run: true    # 可选：试运行，仅列出待删除项而不实际删除
