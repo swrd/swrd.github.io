@@ -1,0 +1,21 @@
+name: Clean up old scheduled workflow runs
+
+on:
+  schedule:
+    - cron: '0 0 1 * *' # 每月第一天 UTC 时间 00:00 运行一次，可按需调整
+  workflow_dispatch:     # 允许手动触发
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write  # 必须赋予写入权限才能删除 runs
+      contents: read
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.MY_CLEANUP_TOKEN }}
+          retain_days: 10     # 保留最近30天的运行记录，删除30天前的
+          keep_minimum_runs: 10 # 即使超过指定天数，也至少保留10次最近的运行
+          # delete_workflow_pattern: 'your-schedule-workflow-name.yml' # 如果你知道具体的调度工作流文件名，可以指定
