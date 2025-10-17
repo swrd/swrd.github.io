@@ -148,7 +148,7 @@ commit message中还要注意的另一点是：它们在读取时计算，但在
 
 ### 逻辑复制中包含生成列
 
-谈到生成列，Postgres 18 增加了将它们包含在逻辑复制流中的能力。之前，我们假设跟随副本可以再次生成这些列，然而如今逻辑复制的用途远不止于 Postgres 到 Postgres 的复制。
+谈到生成列，Postgres 18 增加了将它们包含在逻辑复制流中的能力，不过目前只支持存储列，虚拟列还不支持。之前，我们假设跟随副本可以再次生成这些列，然而如今逻辑复制的用途远不止于 Postgres 到 Postgres 的复制。
 
 这对于像 [pgstream](https://github.com/xataio/pgstream) 和 Debezium 这样的 CDC 工具来说是个好消息，它们现在可以获取生成列。
 
