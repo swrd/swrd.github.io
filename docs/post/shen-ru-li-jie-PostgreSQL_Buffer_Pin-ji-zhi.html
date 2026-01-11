@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    <script src='https://blog.meekdai.com/Gmeek/plugins/GmeekVercount.js'></script>
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/5057571?s=96&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="
+## 一、Buffer Pin 的本质：三个字——'不准动'
+
+### 1.1 核心定义
+
+**Pin**（钉住）的含义非常简单：
+
+> 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。">
+<meta property="og:title" content="深入理解PostgreSQL_Buffer_Pin机制">
+<meta property="og:description" content="
+## 一、Buffer Pin 的本质：三个字——'不准动'
+
+### 1.1 核心定义
+
+**Pin**（钉住）的含义非常简单：
+
+> 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://swrd.github.io/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<title>深入理解PostgreSQL_Buffer_Pin机制</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">深入理解PostgreSQL_Buffer_Pin机制</h1>
+<div class="title-right">
+    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/12" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h2>一、Buffer Pin 的本质：三个字——"不准动"</h2>
+<h3>1.1 核心定义</h3>
+<p><strong>Pin</strong>（钉住）的含义非常简单：</p>
+<blockquote>
+<p>只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就<strong>绝对不会</strong>被淘汰替换。</p>
+</blockquote>
+<p>这是 PostgreSQL 缓冲区管理的<strong>硬性约束</strong>，没有任何例外。</p>
+<p>来看源码中的权威定义（<code class="notranslate">src/backend/storage/buffer/README:35</code>）：</p>
+<pre class="notranslate"><code class="notranslate">Pins: one must "hold a pin on" a buffer before being allowed to do anything
+at all with it. An unpinned buffer is subject to being reclaimed and reused
+for a different page at any instant, so touching it is unsafe.
+</code></pre>
+<p>翻译过来就是：</p>
+<ul>
+<li>想对 Buffer 做任何操作，必须先 Pin 住它</li>
+<li>没有 Pin 的 Buffer 随时可能被回收替换</li>
+<li>访问未 Pin 的 Buffer 是<strong>不安全</strong>的</li>
+</ul>
+<h3>1.2 refcount：Pin 的技术实现</h3>
+<p>在 PostgreSQL 中，Pin 是通过 <strong>引用计数（refcount）</strong> 实现的。</p>
+<p>每个 Buffer 描述符（<code class="notranslate">BufferDesc</code>）中有一个 32 位的 <code class="notranslate">state</code> 字段，其中<strong>低 18 位</strong>就是 refcount：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/include/storage/buf_internals.h:29-33</span>
+<span class="pl-c">/*</span>
+<span class="pl-c"> * Buffer state is a single 32-bit variable where following data is combined.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * - 18 bits refcount      &lt;- Pin 计数</span>
+<span class="pl-c"> * - 4 bits usage count    &lt;- 使用频率</span>
+<span class="pl-c"> * - 10 bits of flags      &lt;- 状态标志</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span> 1
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_MASK</span> ((1U &lt;&lt; 18) - 1)  // 最大值 262,143</pre></div>
+<p><strong>关键数值</strong>：</p>
+<ul>
+<li>位宽：18 位</li>
+<li>最大值：2^18 - 1 = <strong>262,143</strong></li>
+<li>含义：最多支持 26 万多个进程同时 Pin 同一个 Buffer</li>
+</ul>
+<p>从 <code class="notranslate">src/include/storage/buf_internals.h</code> 可以看到，<code class="notranslate">BufferDesc</code> 中的 <code class="notranslate">state</code> 字段是一个 32 位原子变量，同时存储了 refcount 和 usage_count：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3"><img width="1098" height="691" alt="Image" src="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3" style="max-width: 100%; height: auto; max-height: 691px;"></a></p>
+<hr>
+<h2>二、Pin、Lock、Usage Count：三剑客的分工</h2>
+<p>很多人容易混淆 Pin、Lock 和 Usage Count。让我用一张图说清楚：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2"><img width="1049" height="486" alt="Image" src="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2" style="max-width: 100%; height: auto; max-height: 486px;"></a></p>
+<h3>2.1 三者对比</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">特性</th>
+<th align="left"><strong>Pin (refcount)</strong></th>
+<th align="left"><strong>Lock (content_lock)</strong></th>
+<th align="left"><strong>Usage Count</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><strong>核心作用</strong></td>
+<td align="left">防止 Buffer 被淘汰</td>
+<td align="left">保护数据内容的并发访问</td>
+<td align="left">影响淘汰优先级</td>
+</tr>
+<tr>
+<td align="left"><strong>类比</strong></td>
+<td align="left">借阅证</td>
+<td align="left">阅览室门锁</td>
+<td align="left">热门程度</td>
+</tr>
+<tr>
+<td align="left"><strong>持有时间</strong></td>
+<td align="left">可以较长</td>
+<td align="left">必须短暂</td>
+<td align="left">N/A（自动管理）</td>
+</tr>
+<tr>
+<td align="left"><strong>硬性约束</strong></td>
+<td align="left">✅ 是</td>
+<td align="left">✅ 是</td>
+<td align="left">❌ 否（软约束）</td>
+</tr>
+<tr>
+<td align="left"><strong>值范围</strong></td>
+<td align="left">0 ~ 262,143</td>
+<td align="left">共享/排他/无</td>
+<td align="left">0 ~ 5</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>2.2 依赖关系：必须先 Pin 后 Lock</h3>
+<p>这是 PostgreSQL 的铁律（<code class="notranslate">README:35</code>）：</p>
+<blockquote>
+<p><strong>"One must pin a buffer before trying to lock it."</strong></p>
+</blockquote>
+<p>为什么？想想看：</p>
+<ol>
+<li>你先获取了 Buffer 的内容锁</li>
+<li>但这时另一个进程把这个 Buffer 淘汰了，换成了另一个页面</li>
+<li>你还在读写原来的数据？<strong>灾难</strong>！</li>
+</ol>
+<p>所以必须先 Pin（保证 Buffer 不被替换），再 Lock（保证内容不被并发修改）。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811"><img width="1060" height="703" alt="Image" src="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811" style="max-width: 100%; height: auto; max-height: 703px;"></a></p>
+<h3>2.3 五条访问规则</h3>
+<p><code class="notranslate">README</code> 文档定义了 5 条 Buffer 访问规则：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="center">规则</th>
+<th align="left">需要</th>
+<th align="left">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center"><strong>#1</strong></td>
+<td align="left">Pin + (共享或排他)Lock</td>
+<td align="left">扫描页面、检查元组可见性</td>
+</tr>
+<tr>
+<td align="center"><strong>#2</strong></td>
+<td align="left">仅 Pin</td>
+<td align="left">访问已确定可见的元组数据</td>
+</tr>
+<tr>
+<td align="center"><strong>#3</strong></td>
+<td align="left">Pin + 排他 Lock</td>
+<td align="left">添加元组或修改 xmin/xmax</td>
+</tr>
+<tr>
+<td align="center"><strong>#4</strong></td>
+<td align="left">Pin + 共享 Lock</td>
+<td align="left">更新提交状态位（hint bits）</td>
+</tr>
+<tr>
+<td align="center"><strong>#5</strong></td>
+<td align="left">Pin + 排他 Lock + refcount=1</td>
+<td align="left">物理删除元组（Cleanup Lock）</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>注意规则 #5：<strong>Cleanup Lock</strong> 不仅需要排他锁，还要求 <code class="notranslate">refcount=1</code>，即当前进程是唯一持有 Pin 的人。这是 VACUUM 物理删除元组时的要求。</p>
+<hr>
+<h2>三、精妙设计：两层引用计数</h2>
+<h3>3.1 问题：高并发下的性能瓶颈</h3>
+<p>如果每次 Pin/Unpin 都直接修改共享内存中的 refcount，会怎样？</p>
+<pre class="notranslate"><code class="notranslate">进程A: Pin(buf1) → refcount++   -- 需要原子操作
+进程B: Pin(buf1) → refcount++   -- 需要原子操作
+进程C: Pin(buf1) → refcount++   -- 需要原子操作
+...
+</code></pre>
+<p>在高并发场景下，大量进程竞争同一个原子变量，性能会急剧下降。</p>
+<h3>3.2 解决方案：私有计数 + 共享计数</h3>
+<p>PostgreSQL 的解决方案非常精妙：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc"><img width="1060" height="800" alt="Image" src="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc" style="max-width: 100%; height: auto; max-height: 800px;"></a></p>
+<p><strong>核心思想</strong>：</p>
+<ol>
+<li><strong>私有引用计数</strong>（PrivateRefCount）：每个进程在自己的本地内存中维护</li>
+<li><strong>共享引用计数</strong>（refcount）：在共享内存的 BufferDesc 中</li>
+</ol>
+<p><strong>工作流程</strong>：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">操作</th>
+<th align="left">私有计数</th>
+<th align="left">共享计数</th>
+<th align="left">竞争情况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">首次 Pin 某 Buffer</td>
+<td align="left">0 → 1</td>
+<td align="left">+1</td>
+<td align="left">需要原子操作</td>
+</tr>
+<tr>
+<td align="left">再次 Pin 同一 Buffer</td>
+<td align="left">+1</td>
+<td align="left">不变</td>
+<td align="left"><strong>无竞争！</strong></td>
+</tr>
+<tr>
+<td align="left">Unpin（非最后一次）</td>
+<td align="left">-1</td>
+<td align="left">不变</td>
+<td align="left"><strong>无竞争！</strong></td>
+</tr>
+<tr>
+<td align="left">最后一次 Unpin</td>
+<td align="left">1 → 0</td>
+<td align="left">-1</td>
+<td align="left">需要原子操作</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>性能收益</strong>：同一进程对同一 Buffer 的重复 Pin/Unpin，只有第一次和最后一次需要访问共享内存！</p>
+<h3>3.3 私有计数的存储结构</h3>
+<p>私有引用计数采用"数组 + 哈希表"的混合存储：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/backend/storage/buffer/bufmgr.c:88, 197-201</span>
+
+<span class="pl-k">#define</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span> 8  // 快速数组大小
+
+<span class="pl-k">static</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;  <span class="pl-c">// 溢出哈希表</span></pre></div>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">组件</th>
+<th align="left">大小</th>
+<th align="left">查找方式</th>
+<th align="left">设计意图</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">快速数组</td>
+<td align="left">8 个条目（64 字节）</td>
+<td align="left">O(8) 顺序扫描</td>
+<td align="left">热点 Buffer 快速访问</td>
+</tr>
+<tr>
+<td align="left">溢出哈希表</td>
+<td align="left">动态扩展，无上限</td>
+<td align="left">O(1) 哈希查找</td>
+<td align="left">处理大量并发 Pin</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>为什么是 64 字节？</strong></p>
+<p>因为 64 字节正好等于大多数 CPU 的<strong>缓存行大小</strong>（Cache Line），可以一次性加载到 CPU 缓存中，实现极快的访问。</p>
+<hr>
+<h2>四、Pin 操作的实现细节</h2>
+<h3>4.1 函数调用链</h3>
+<pre class="notranslate"><code class="notranslate">ReadBuffer()                           ← 简化入口 (bufmgr.c:697)
+    │
+    └── ReadBufferExtended()           ← 扩展入口 (bufmgr.c:744)
+            │
+            └── ReadBuffer_common()    ← 核心实现 (bufmgr.c:807)
+                    │
+                    └── BufferAlloc()  ← 分配/查找Buffer (bufmgr.c:1107)
+                            │
+                            ├── PinBuffer()        ← Buffer命中时 (bufmgr.c:1692)
+                            │
+                            └── PinBuffer_Locked() ← 新分配Buffer时 (bufmgr.c:1795)
+</code></pre>
+<h3>调用链详解</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>函数</th>
+<th>位置</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">ReadBuffer</code></td>
+<td>bufmgr.c:697</td>
+<td>简化接口，读取MAIN_FORKNUM</td>
+</tr>
+<tr>
+<td><code class="notranslate">ReadBufferExtended</code></td>
+<td>bufmgr.c:744</td>
+<td>支持指定fork和读取模式</td>
+</tr>
+<tr>
+<td><code class="notranslate">ReadBuffer_common</code></td>
+<td>bufmgr.c:807</td>
+<td>统一处理本地/共享buffer</td>
+</tr>
+<tr>
+<td><code class="notranslate">BufferAlloc</code></td>
+<td>bufmgr.c:1107</td>
+<td>共享buffer的分配与查找</td>
+</tr>
+<tr>
+<td><code class="notranslate">PinBuffer</code></td>
+<td>bufmgr.c:1692</td>
+<td>无锁pin操作（CAS）</td>
+</tr>
+<tr>
+<td><code class="notranslate">PinBuffer_Locked</code></td>
+<td>bufmgr.c:1795</td>
+<td>持有spinlock时的pin</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>4.2 Pin机制的核心设计</h3>
+<p>PostgreSQL采用<strong>两层引用计数</strong>机制来实现Buffer Pin：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66"><img width="1014" height="787" alt="Image" src="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66" style="max-width: 100%; height: auto; max-height: 787px;"></a></p>
+<h4>设计优势</h4>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>层级</th>
+<th>存储位置</th>
+<th>作用</th>
+<th>性能特点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>私有引用计数</strong></td>
+<td>Backend本地内存</td>
+<td>记录当前进程对buffer的pin次数</td>
+<td>无锁访问，极快</td>
+</tr>
+<tr>
+<td><strong>共享引用计数</strong></td>
+<td><code class="notranslate">BufferDesc-&gt;state</code></td>
+<td>记录所有进程对buffer的总pin数</td>
+<td>原子操作，有竞争</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>设计意图</strong>：同一进程多次pin同一buffer时，只需修改私有计数，避免频繁竞争共享状态。仅在首次pin和最后unpin时才更新共享引用计数。</p>
+<h3>4.3 核心数据结构</h3>
+<h4>4.3.1 私有引用计数条目</h4>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:81-85</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span>
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-c1">buffer</span>;     <span class="pl-c">// Buffer编号（1-based）</span>
+    <span class="pl-smi">int32</span>       <span class="pl-c1">refcount</span>;   <span class="pl-c">// 本进程的pin次数</span>
+} <span class="pl-smi">PrivateRefCountEntry</span>;</pre></div>
+<h4>4.3.2 私有引用计数存储</h4>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:197-201</span>
+
+<span class="pl-c">// 快速数组：存放最常用的8个buffer</span>
+<span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+
+<span class="pl-c">// 溢出哈希表：超过8个时使用</span>
+<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;
+
+<span class="pl-c">// 溢出计数</span>
+<span class="pl-k">static</span> <span class="pl-smi">int32</span> <span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+<span class="pl-c">// 时钟指针：用于选择要移入哈希表的数组项</span>
+<span class="pl-k">static</span> <span class="pl-smi">uint32</span> <span class="pl-s1">PrivateRefCountClock</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+<span class="pl-c">// 预留的空闲条目</span>
+<span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;</pre></div>
+<h3>4.4 Pin操作完整流程图</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746"><img width="942" height="901" alt="Image" src="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746" style="max-width: 100%; height: auto; max-height: 901px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849"><img width="947" height="216" alt="Image" src="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849" style="max-width: 100%; height: auto; max-height: 216px;"></a></p>
+<h4>4.4.1 PinBuffer() 详解</h4>
+<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1692-1771</code></p>
+<p>这是<strong>不持有spinlock</strong>时的pin操作，使用CAS原子操作实现无锁更新：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">bool</span>
+<span class="pl-en">PinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>)
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+    <span class="pl-smi">bool</span>        <span class="pl-s1">result</span>;
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+
+    <span class="pl-c">// 步骤1: 查找私有引用计数条目</span>
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, true);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">ref</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-c">// 情况A: 首次pin此buffer，需要更新共享引用计数</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
+        <span class="pl-smi">uint32</span>      <span class="pl-s1">old_buf_state</span>;
+
+        <span class="pl-c">// 步骤2: 预留私有引用计数空间</span>
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+
+        <span class="pl-c">// 步骤3: 创建新的私有引用计数条目</span>
+        <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
+
+        <span class="pl-c">// 步骤4: CAS循环更新共享引用计数</span>
+        <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+        <span class="pl-k">for</span> (;;)
+        {
+            <span class="pl-c">// 如果buffer被锁定，等待解锁</span>
+            <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+                <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+
+            <span class="pl-c">// 增加共享引用计数</span>
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+            <span class="pl-c">// 更新usage_count（用于替换算法）</span>
+            <span class="pl-k">if</span> (<span class="pl-s1">strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+            {
+                <span class="pl-c">// 默认策略：增加usage_count直到最大值</span>
+                <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>)
+                    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+            }
+            <span class="pl-k">else</span>
+            {
+                <span class="pl-c">// Ring buffer策略：只设置为1，避免驱逐其他buffer</span>
+                <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+                    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+            }
+
+            <span class="pl-c">// CAS原子更新</span>
+            <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
+                                               <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
+            {
+                <span class="pl-s1">result</span> <span class="pl-c1">=</span> (<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_VALID</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+
+                <span class="pl-c">// Valgrind: 标记buffer内存为可访问</span>
+                <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+                <span class="pl-k">break</span>;
+            }
+            <span class="pl-c">// CAS失败，old_buf_state已被更新为当前值，继续循环</span>
+        }
+    }
+    <span class="pl-k">else</span>
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-c">// 情况B: 已经pin过，无需修改共享状态</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-s1">result</span> <span class="pl-c1">=</span> true;
+    }
+
+    <span class="pl-c">// 步骤5: 增加私有引用计数</span>
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
+
+    <span class="pl-c">// 步骤6: 记录到ResourceOwner（用于事务结束时自动释放）</span>
+    <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+
+    <span class="pl-k">return</span> <span class="pl-s1">result</span>;
+}</pre></div>
+<h5>关键技术点</h5>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>技术</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CAS循环</strong></td>
+<td>使用<code class="notranslate">pg_atomic_compare_exchange_u32</code>实现乐观锁，避免spinlock开销</td>
+</tr>
+<tr>
+<td><strong>等待解锁</strong></td>
+<td>若<code class="notranslate">BM_LOCKED</code>标志置位，调用<code class="notranslate">WaitBufHdrUnlocked</code>等待</td>
+</tr>
+<tr>
+<td><strong>usage_count</strong></td>
+<td>默认策略下递增至最大值5，影响Clock-Sweep替换算法</td>
+</tr>
+<tr>
+<td><strong>Ring策略</strong></td>
+<td>批量扫描时使用，usage_count只设为1，减少对缓存的影响</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h4>4.4.2 PinBuffer_Locked() 详解</h4>
+<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1795-1829</code></p>
+<p>这是<strong>持有spinlock</strong>时的pin操作，用于新分配的victim buffer：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
+<span class="pl-en">PinBuffer_Locked</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>)
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-s1">b</span>;
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+    <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
+
+    <span class="pl-c">// 前置条件检查：不应有预存的私有引用</span>
+    <span class="pl-en">Assert</span>(<span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>), false) <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>);
+
+    <span class="pl-c">// Valgrind: 标记buffer内存为可访问</span>
+    <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 步骤1: 读取state并增加引用计数</span>
+    <span class="pl-c">// 因为持有spinlock，可以直接修改（无需CAS）</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>);  <span class="pl-c">// 确认持有spinlock</span>
+    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 步骤2: 释放spinlock（写入新状态并清除BM_LOCKED）</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">buf_state</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 步骤3: 创建私有引用计数条目（spinlock已释放）</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 步骤4: 记录到ResourceOwner</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+}</pre></div>
+<h5>与PinBuffer的区别</h5>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>特性</th>
+<th>PinBuffer</th>
+<th>PinBuffer_Locked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>调用场景</strong></td>
+<td>Buffer已在缓存中</td>
+<td>新分配的victim buffer</td>
+</tr>
+<tr>
+<td><strong>锁状态</strong></td>
+<td>不持有spinlock</td>
+<td>持有spinlock</td>
+</tr>
+<tr>
+<td><strong>更新方式</strong></td>
+<td>CAS循环</td>
+<td>直接写入</td>
+</tr>
+<tr>
+<td><strong>usage_count</strong></td>
+<td>可能更新</td>
+<td>不更新</td>
+</tr>
+<tr>
+<td><strong>预存引用检查</strong></td>
+<td>允许有预存引用</td>
+<td>不允许</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>4.5 私有引用计数管理</h3>
+<h4>4.5.1 存储策略</h4>
+<p>采用<strong>数组+哈希表</strong>的混合存储，优化常见场景：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d"><img width="1015" height="818" alt="Image" src="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d" style="max-width: 100%; height: auto; max-height: 818px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6"><img width="1017" height="244" alt="Image" src="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6" style="max-width: 100%; height: auto; max-height: 244px;"></a></p>
+<h4>4.5.2 核心函数</h4>
+<h5>ReservePrivateRefCountEntry() - <code class="notranslate">bufmgr.c:214-275</code></h5>
+<p>预留一个空闲的引用计数条目：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span> <span class="pl-en">ReservePrivateRefCountEntry</span>(<span class="pl-smi">void</span>)
+{
+    <span class="pl-c">// 如果已有预留，直接返回</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-k">return</span>;
+
+    <span class="pl-c">// 首先在数组中查找空闲槽位</span>
+    <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">InvalidBuffer</span>)
+        {
+            <span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>];
+            <span class="pl-k">return</span>;
+        }
+    }
+
+    <span class="pl-c">// 数组已满，使用时钟算法选择victim移入哈希表</span>
+    <span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span>
+        <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">PrivateRefCountClock</span><span class="pl-c1">++</span> % <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+
+    <span class="pl-c">// 将victim移入哈希表</span>
+    <span class="pl-s1">hashent</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>,
+                          <span class="pl-c1">&amp;</span>(<span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span>),
+                          <span class="pl-c1">HASH_ENTER</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
+    <span class="pl-s1">hashent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
+
+    <span class="pl-c">// 清空数组槽位</span>
+    <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">InvalidBuffer</span>;
+    <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+    <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">++</span>;
+}</pre></div>
+<h5>GetPrivateRefCountEntry() - <code class="notranslate">bufmgr.c:306-379</code></h5>
+<p>查找指定buffer的引用计数条目：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span>
+<span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-smi">Buffer</span> <span class="pl-s1">buffer</span>, <span class="pl-smi">bool</span> <span class="pl-s1">do_move</span>)
+{
+    <span class="pl-c">// 1. 先在数组中查找（O(8)）</span>
+    <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">buffer</span>)
+            <span class="pl-k">return</span> <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>];
+    }
+
+    <span class="pl-c">// 2. 如果没有溢出，直接返回NULL</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+        <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
+
+    <span class="pl-c">// 3. 在哈希表中查找</span>
+    <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_FIND</span>, <span class="pl-c1">NULL</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">res</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
+
+    <span class="pl-c">// 4. 如果do_move=true，将条目移回数组以加速后续访问</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">do_move</span>)
+    {
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+        <span class="pl-s1">free</span> <span class="pl-c1">=</span> <span class="pl-s1">ReservedRefCountEntry</span>;
+        <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">buffer</span>;
+        <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">res</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
+
+        <span class="pl-c">// 从哈希表删除</span>
+        <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_REMOVE</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
+        <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">--</span>;
+
+        <span class="pl-k">return</span> <span class="pl-s1">free</span>;
+    }
+
+    <span class="pl-k">return</span> <span class="pl-s1">res</span>;
+}</pre></div>
+<h4>4.5.3 BufferAlloc中的Pin调用</h4>
+<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1107-1405</code></p>
+<p><code class="notranslate">BufferAlloc</code>是<code class="notranslate">ReadBuffer_common</code>的子函数，负责在共享buffer池中分配或查找buffer：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span>
+<span class="pl-en">BufferAlloc</span>(<span class="pl-smi">SMgrRelation</span> <span class="pl-s1">smgr</span>, <span class="pl-smi">char</span> <span class="pl-s1">relpersistence</span>, <span class="pl-smi">ForkNumber</span> <span class="pl-s1">forkNum</span>,
+            <span class="pl-smi">BlockNumber</span> <span class="pl-s1">blockNum</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>, <span class="pl-smi">bool</span> <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span>)
+{
+    <span class="pl-c">// 创建BufferTag</span>
+    <span class="pl-en">INIT_BUFFERTAG</span>(<span class="pl-s1">newTag</span>, <span class="pl-s1">smgr</span><span class="pl-c1">-&gt;</span><span class="pl-c1">smgr_rnode</span>.<span class="pl-c1">node</span>, <span class="pl-s1">forkNum</span>, <span class="pl-s1">blockNum</span>);
+    <span class="pl-s1">newHash</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableHashCode</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>);
+    <span class="pl-s1">newPartitionLock</span> <span class="pl-c1">=</span> <span class="pl-en">BufMappingPartitionLock</span>(<span class="pl-s1">newHash</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 场景1: 在哈希表中查找buffer</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-en">LWLockAcquire</span>(<span class="pl-s1">newPartitionLock</span>, <span class="pl-c1">LW_SHARED</span>);
+    <span class="pl-s1">buf_id</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableLookup</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>, <span class="pl-s1">newHash</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">buf_id</span> &gt;= <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c">// Buffer命中！</span>
+        <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">GetBufferDescriptor</span>(<span class="pl-s1">buf_id</span>);
+
+        <span class="pl-c">// 调用 PinBuffer (不持有spinlock)</span>
+        <span class="pl-s1">valid</span> <span class="pl-c1">=</span> <span class="pl-en">PinBuffer</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">strategy</span>);        <span class="pl-c">// ← Pin操作</span>
+
+        <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
+        <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span> <span class="pl-c1">=</span> true;
+
+        <span class="pl-c">// 处理BM_VALID检查...</span>
+        <span class="pl-k">return</span> <span class="pl-s1">buf</span>;
+    }
+
+    <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// 场景2: Buffer未命中，需要分配新buffer</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-k">for</span> (;;)
+    {
+        <span class="pl-c">// 预留私有引用计数空间</span>
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+
+        <span class="pl-c">// 获取victim buffer（带spinlock返回）</span>
+        <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">StrategyGetBuffer</span>(<span class="pl-s1">strategy</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buf_state</span>);
+
+        <span class="pl-c">// 调用 PinBuffer_Locked (持有spinlock)</span>
+        <span class="pl-en">PinBuffer_Locked</span>(<span class="pl-s1">buf</span>);                   <span class="pl-c">// ← Pin操作</span>
+
+        <span class="pl-c">// 处理脏页刷新、重新验证等...</span>
+
+        <span class="pl-c">// 如果成功，返回buffer</span>
+        <span class="pl-c">// 否则UnpinBuffer并继续循环</span>
+    }
+}</pre></div>
+<h4>4.5.4. UnpinBuffer详解</h4>
+<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1840-1923</code></p>
+<p>与Pin相对的Unpin操作：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
+<span class="pl-en">UnpinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">bool</span> <span class="pl-s1">fixOwner</span>)
+{
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+    <span class="pl-smi">Buffer</span> <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+
+    <span class="pl-c">// 获取私有引用计数条目</span>
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, false);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>);
+
+    <span class="pl-c">// 从ResourceOwner移除</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">fixOwner</span>)
+        <span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+
+    <span class="pl-c">// 减少私有引用计数</span>
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">--</span>;
+
+    <span class="pl-k">if</span> (<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+        <span class="pl-c">// 最后一个私有引用，需要更新共享引用计数</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+
+        <span class="pl-c">// Valgrind: 标记buffer为不可访问</span>
+        <span class="pl-en">VALGRIND_MAKE_MEM_NOACCESS</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+
+        <span class="pl-c">// 确认没有持有content lock</span>
+        <span class="pl-en">Assert</span>(!<span class="pl-en">LWLockHeldByMe</span>(<span class="pl-en">BufferDescriptorGetContentLock</span>(<span class="pl-s1">buf</span>)));
+
+        <span class="pl-c">// CAS循环减少共享引用计数</span>
+        <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+        <span class="pl-k">for</span> (;;)
+        {
+            <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+                <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;  <span class="pl-c">// 减少引用计数</span>
+
+            <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
+                                               <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
+            {
+                <span class="pl-c">// 如果有等待者且引用计数为0，唤醒它们</span>
+                <span class="pl-k">if</span> ((<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_PIN_COUNT_WAITER</span>) <span class="pl-c1">&amp;&amp;</span>
+                    <span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+                    <span class="pl-c">/* ... wake up waiters ... */</span>
+                <span class="pl-k">break</span>;
+            }
+        }
+
+        <span class="pl-c">// 释放私有引用计数条目</span>
+        <span class="pl-en">ForgetPrivateRefCountEntry</span>(<span class="pl-s1">ref</span>);
+    }
+}</pre></div>
+<h4>4.5.5. ResourceOwner集成</h4>
+<p>Pin操作与PostgreSQL的资源管理系统紧密集成：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// 在ReadBuffer_common开始时</span>
+<span class="pl-en">ResourceOwnerEnlargeBuffers</span>(<span class="pl-s1">CurrentResourceOwner</span>);  <span class="pl-c">// bufmgr.c:820</span>
+
+<span class="pl-c">// 在PinBuffer/PinBuffer_Locked结束时</span>
+<span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1769, 1828</span>
+
+<span class="pl-c">// 在UnpinBuffer时</span>
+<span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1850</span></pre></div>
+<p><strong>设计目的</strong>：</p>
+<ol>
+<li><strong>自动清理</strong>：事务结束时自动释放所有pinned buffers</li>
+<li><strong>泄漏检测</strong>：检查是否有buffer在不应该的时候仍被pin住</li>
+<li><strong>资源追踪</strong>：便于调试和监控</li>
+</ol>
+<h2>五. 总结</h2>
+<h3>Pin操作的核心特性</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>特性</th>
+<th>实现方式</th>
+<th>优势</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>无锁更新</strong></td>
+<td>CAS原子操作</td>
+<td>避免spinlock开销，提高并发性</td>
+</tr>
+<tr>
+<td><strong>两层引用计数</strong></td>
+<td>私有+共享</td>
+<td>减少竞争，同进程重复pin几乎无开销</td>
+</tr>
+<tr>
+<td><strong>混合存储</strong></td>
+<td>数组(≤8)+哈希表</td>
+<td>常见场景O(1)访问，支持大量pin</td>
+</tr>
+<tr>
+<td><strong>资源追踪</strong></td>
+<td>ResourceOwner</td>
+<td>自动清理，防止泄漏</td>
+</tr>
+<tr>
+<td><strong>替换友好</strong></td>
+<td>usage_count</td>
+<td>支持Clock-Sweep算法</td>
+</tr>
+<tr>
+<td><strong>策略感知</strong></td>
+<td>BufferAccessStrategy</td>
+<td>批量操作减少缓存污染</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>性能考量</h3>
+<ul>
+<li><strong>热点buffer</strong>：同进程重复访问只修改私有计数，无竞争</li>
+<li><strong>CAS失败重试</strong>：高并发时可能多次重试，但比spinlock更高效</li>
+<li><strong>内存布局</strong>：PrivateRefCountArray大小64字节，适配CPU缓存行</li>
+</ul>
+<h2>参考资料：</h2>
+<ul>
+<li><a href="https://www.interdb.jp/pg/pgsql08/index.html" rel="nofollow">interdb</a></li>
+<li>PostgreSQL 14.4 源码:  src\backend\storage\buffer\bufmgr.c</li>
+<li><code class="notranslate">src/backend/storage/buffer/README</code></li>
+</ul></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>

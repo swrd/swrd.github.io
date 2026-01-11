@@ -1,5 +1,12 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Thu, 16 Oct 2025 08:42:49 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>深入探索 PostgreSQL 18 的新特性</title><link>https://swrd.github.io/post/shen-ru-tan-suo-%20PostgreSQL%2018%20-de-xin-te-xing.html</link><description>译自：https://xata.io/blog/going-down-the-rabbit-hole-of-postgres-18-features
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PGStone</title><link>https://swrd.github.io</link><description>道阻且长,行则将至</description><copyright>PGStone</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/5057571?s=96&amp;v=4</url><title>avatar</title><link>https://swrd.github.io</link></image><lastBuildDate>Sun, 11 Jan 2026 14:49:21 +0000</lastBuildDate><managingEditor>PGStone</managingEditor><ttl>60</ttl><webMaster>PGStone</webMaster><item><title>深入理解PostgreSQL_Buffer_Pin机制</title><link>https://swrd.github.io/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html</link><description>
+## 一、Buffer Pin 的本质：三个字——'不准动'
+
+### 1.1 核心定义
+
+**Pin**（钉住）的含义非常简单：
+
+&gt; 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。</description><guid isPermaLink="true">https://swrd.github.io/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html</guid><pubDate>Sun, 11 Jan 2026 14:37:15 +0000</pubDate></item><item><title>深入探索 PostgreSQL 18 的新特性</title><link>https://swrd.github.io/post/shen-ru-tan-suo-%20PostgreSQL%2018%20-de-xin-te-xing.html</link><description>译自：https://xata.io/blog/going-down-the-rabbit-hole-of-postgres-18-features
 
 &gt; 部分内容略作修改
 
