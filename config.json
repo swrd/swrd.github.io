@@ -1,6 +1,8 @@
 {
     "title":"PGStone",
     "subTitle":"道阻且长,行则将至",
+    "description": "PostgreSQL 数据库技术博客，专注于源码分析、性能优化和运维实战",
+    "keywords": "PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化"
     "homeUrl":"https://swrd.github.io",
     "avatarUrl":"https://avatars.githubusercontent.com/u/5057571?s=96&v=4",
     "singlePage":["link","about"],
