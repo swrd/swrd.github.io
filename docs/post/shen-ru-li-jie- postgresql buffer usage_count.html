@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    <script src='https://blog.meekdai.com/Gmeek/plugins/GmeekVercount.js'></script>
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/5057571?s=96&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="
+## 1. 概述
+
+`usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。">
+<meta property="og:title" content="深入理解 postgresql buffer usage_count">
+<meta property="og:description" content="
+## 1. 概述
+
+`usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://swrd.github.io/post/shen-ru-li-jie-%20postgresql%20buffer%20usage_count.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<title>深入理解 postgresql buffer usage_count</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">深入理解 postgresql buffer usage_count</h1>
+<div class="title-right">
+    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/13" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h2>1. 概述</h2>
+<p><code class="notranslate">usagecount</code>（使用计数）是 PostgreSQL 缓冲区管理中实现<strong>时钟扫描（Clock Sweep）算法</strong>的核心数据结构。它是一种近似 LRU（Least Recently Used）的缓冲区替换策略，在保持较低开销的同时，提供了良好的缓存命中率。</p>
+<h3>设计意图</h3>
+<ul>
+<li><strong>缓存热度评估</strong>: 通过跟踪缓冲页被访问的频率，评估其"热度"</li>
+<li><strong>高效替换策略</strong>: 避免频繁使用的页面被意外替换出缓冲池</li>
+<li><strong>性能平衡</strong>: 在 LRU 准确性和实现效率之间取得平衡</li>
+</ul>
+<p>根据源代码注释（<code class="notranslate">buf_internals.h:70-76</code>）：</p>
+<blockquote>
+<p>The maximum allowed value of usage_count represents a tradeoff between accuracy and speed of the clock-sweep buffer management algorithm. A large value (comparable to NBuffers) would approximate LRU semantics. But it can take as many as BM_MAX_USAGE_COUNT+1 complete cycles of clock sweeps to find a free buffer, so in practice we don't want the value to be very large.</p>
+</blockquote>
+<ul>
+<li><strong>值越大</strong> → 越接近真正的 LRU 算法，但查找空闲缓冲区越慢</li>
+<li><strong>值越小</strong> → 查找速度快，但替换策略不够精确</li>
+</ul>
+<p>PostgreSQL 选择 <code class="notranslate">BM_MAX_USAGE_COUNT = 5</code> 作为最佳平衡点。</p>
+<h2>2. 数据结构</h2>
+<h3>2.1 状态变量布局</h3>
+<p>PostgreSQL 将缓冲区的引用计数、使用计数和标志位合并到一个 32 位原子变量 <code class="notranslate">state</code> 中：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:29-46 */</span>
+
+<span class="pl-c">/*</span>
+<span class="pl-c"> * Buffer state is a single 32-bit variable where following data is combined.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * - 18 bits refcount</span>
+<span class="pl-c"> * - 4 bits usage count</span>
+<span class="pl-c"> * - 10 bits of flags</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span> 1
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_MASK</span> ((1U &lt;&lt; 18) - 1)
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_USAGECOUNT_MASK</span> 0x003C0000U
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span> (1U &lt;&lt; 18)
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_USAGECOUNT_SHIFT</span> 18
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_FLAG_MASK</span> 0xFFC00000U</pre></div>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>宏名称</th>
+<th>值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">BUF_REFCOUNT_ONE</code></td>
+<td>1</td>
+<td>refcount增加的步长</td>
+</tr>
+<tr>
+<td><code class="notranslate">BUF_REFCOUNT_MASK</code></td>
+<td>((1U &lt;&lt; 18) - 1)</td>
+<td>refcount 掩码 = 0x0003FFFF</td>
+</tr>
+<tr>
+<td><code class="notranslate">BUF_USAGECOUNT_MASK</code></td>
+<td>0x003C0000U</td>
+<td>掩码：提取 usage_count 字段</td>
+</tr>
+<tr>
+<td><code class="notranslate">BUF_USAGECOUNT_ONE</code></td>
+<td>(1U &lt;&lt; 18)</td>
+<td>增加 1 的步长值 = 0x00040000</td>
+</tr>
+<tr>
+<td><code class="notranslate">BM_MAX_USAGE_COUNT</code></td>
+<td>5</td>
+<td>usage_count 的最大值</td>
+</tr>
+<tr>
+<td><code class="notranslate">BUF_USAGECOUNT_SHIFT</code></td>
+<td>18</td>
+<td>右移位数以获取实际计数值</td>
+</tr>
+<tr>
+<td><code class="notranslate">BUF_FLAG_MASK</code></td>
+<td>0xFFC00000U</td>
+<td>标志位掩码</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>2.2 位布局图</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41"><img width="1200" height="420" alt="Image" src="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41" style="max-width: 100%; height: auto; max-height: 420px;"></a></p>
+<h3>2.3 提取宏定义</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:48-50 */</span>
+
+<span class="pl-c">/* Get refcount and usagecount from buffer state */</span>
+<span class="pl-k">#define</span> <span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">state</span>) ((state) &amp; BUF_REFCOUNT_MASK)
+<span class="pl-k">#define</span> <span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">state</span>) (((state) &amp; BUF_USAGECOUNT_MASK) &gt;&gt; BUF_USAGECOUNT_SHIFT)</pre></div>
+<h3>2.4 usagecount 最大值</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:70-77 */</span>
+
+<span class="pl-c">/*</span>
+<span class="pl-c"> * The maximum allowed value of usage_count represents a tradeoff between</span>
+<span class="pl-c"> * accuracy and speed of the clock-sweep buffer management algorithm.  A</span>
+<span class="pl-c"> * large value (comparable to NBuffers) would approximate LRU semantics.</span>
+<span class="pl-c"> * But it can take as many as BM_MAX_USAGE_COUNT+1 complete cycles of</span>
+<span class="pl-c"> * clock sweeps to find a free buffer, so in practice we don't want the</span>
+<span class="pl-c"> * value to be very large.</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>	5</pre></div>
+<h3>2.5 BufferDesc 结构</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:182-193 */</span>
+
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">BufferDesc</span>
+{
+    <span class="pl-smi">BufferTag</span>       <span class="pl-c1">tag</span>;              <span class="pl-c">/* 缓冲区包含的页面 ID */</span>
+    <span class="pl-smi">int</span>             <span class="pl-c1">buf_id</span>;           <span class="pl-c">/* 缓冲区索引号 (从 0 开始) */</span>
+    <span class="pl-smi">pg_atomic_uint32</span> <span class="pl-c1">state</span>;           <span class="pl-c">/* 包含 flags、refcount 和 usagecount */</span>
+    <span class="pl-smi">int</span>             <span class="pl-c1">wait_backend_pid</span>; <span class="pl-c">/* 等待 pin count 的后端 PID */</span>
+    <span class="pl-smi">int</span>             <span class="pl-c1">freeNext</span>;         <span class="pl-c">/* freelist 链表中的链接 */</span>
+    <span class="pl-smi">LWLock</span>          <span class="pl-c1">content_lock</span>;     <span class="pl-c">/* 访问缓冲区内容的锁 */</span>
+} <span class="pl-smi">BufferDesc</span>;</pre></div>
+<h2>3. 时钟扫描算法</h2>
+<h3>3.1 算法原理</h3>
+<p>时钟扫描算法是一种模拟二次机会（Second Chance）算法的页面替换策略：</p>
+<ol>
+<li><strong>时钟指针</strong>：<code class="notranslate">nextVictimBuffer</code> 作为时钟指针，循环遍历所有缓冲区</li>
+<li><strong>使用计数递减</strong>：每当时钟指针经过一个缓冲区，如果 <code class="notranslate">usagecount &gt; 0</code> 且 <code class="notranslate">refcount == 0</code>，则递减 <code class="notranslate">usagecount</code></li>
+<li><strong>缓冲区选择</strong>：当 <code class="notranslate">usagecount == 0</code> 且 <code class="notranslate">refcount == 0</code> 时，该缓冲区被选为替换目标</li>
+</ol>
+<h3>3.2 算法流程图</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1"><img width="1200" height="1457" alt="Image" src="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1" style="max-width: 100%; height: auto; max-height: 1457px;"></a></p>
+<p>根据 <code class="notranslate">src/backend/storage/buffer/README:171-197</code>：</p>
+<blockquote>
+<p>Each buffer header contains a usage counter, which is incremented (up to a small limit value) whenever the buffer is pinned.</p>
+</blockquote>
+<p><strong>算法步骤</strong>：</p>
+<ol>
+<li>获取 <code class="notranslate">buffer_strategy_lock</code></li>
+<li>如果空闲列表非空，取头部缓冲区；若 usage_count &gt; 0 则跳过</li>
+<li>若空闲列表为空，使用 <code class="notranslate">nextVictimBuffer</code> 指向的缓冲区，并推进指针</li>
+<li>若缓冲区被 pin 或 usage_count &gt; 0，递减 usage_count，回到步骤 3</li>
+<li>使用该缓冲区</li>
+</ol>
+<h3>3.3 核心数据结构 BufferStrategyControl</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/freelist.c:29-61 */</span>
+
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span>
+{
+    <span class="pl-smi">slock_t</span>         <span class="pl-c1">buffer_strategy_lock</span>;     <span class="pl-c">/* 自旋锁保护 */</span>
+
+    <span class="pl-c">/* 时钟指针：下一个要考虑的缓冲区索引 */</span>
+    <span class="pl-smi">pg_atomic_uint32</span> <span class="pl-c1">nextVictimBuffer</span>;
+
+    <span class="pl-smi">int</span>             <span class="pl-c1">firstFreeBuffer</span>;  <span class="pl-c">/* 空闲缓冲区链表头 */</span>
+    <span class="pl-smi">int</span>             <span class="pl-c1">lastFreeBuffer</span>;   <span class="pl-c">/* 空闲缓冲区链表尾 */</span>
+
+    <span class="pl-c">/* 统计信息 */</span>
+    <span class="pl-smi">uint32</span>          <span class="pl-c1">completePasses</span>;   <span class="pl-c">/* 完整扫描的周期数 */</span>
+    <span class="pl-smi">pg_atomic_uint32</span> <span class="pl-c1">numBufferAllocs</span>; <span class="pl-c">/* 上次重置后分配的缓冲区数 */</span>
+
+    <span class="pl-smi">int</span>             <span class="pl-c1">bgwprocno</span>;        <span class="pl-c">/* 后台写进程号 */</span>
+} <span class="pl-smi">BufferStrategyControl</span>;</pre></div>
+<h3>3.4 ClockSweepTick 实现</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/freelist.c:112-169 */</span>
+
+<span class="pl-k">static</span> <span class="pl-k">inline</span> <span class="pl-smi">uint32</span>
+<span class="pl-en">ClockSweepTick</span>(<span class="pl-smi">void</span>)
+{
+    <span class="pl-smi">uint32</span> <span class="pl-s1">victim</span>;
+
+    <span class="pl-c">/*</span>
+<span class="pl-c">     * 原子性地将时钟指针向前移动一位</span>
+<span class="pl-c">     * 如果多个进程同时执行，可能导致缓冲区返回顺序略有偏差</span>
+<span class="pl-c">     */</span>
+    <span class="pl-s1">victim</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_fetch_add_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">StrategyControl</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextVictimBuffer</span>, <span class="pl-c1">1</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">victim</span> &gt;= <span class="pl-s1">NBuffers</span>)
+    {
+        <span class="pl-smi">uint32</span> <span class="pl-s1">originalVictim</span> <span class="pl-c1">=</span> <span class="pl-s1">victim</span>;
+        <span class="pl-s1">victim</span> <span class="pl-c1">=</span> <span class="pl-s1">victim</span> % <span class="pl-s1">NBuffers</span>;  <span class="pl-c">/* 环绕处理 */</span>
+
+        <span class="pl-c">/* 如果是导致环绕的进程，递增 completePasses */</span>
+        <span class="pl-k">if</span> (<span class="pl-s1">victim</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+        {
+            <span class="pl-c">// ... 获取自旋锁并递增 completePasses ...</span>
+            <span class="pl-s1">StrategyControl</span><span class="pl-c1">-&gt;</span><span class="pl-c1">completePasses</span><span class="pl-c1">++</span>;
+        }
+    }
+    <span class="pl-k">return</span> <span class="pl-s1">victim</span>;
+}</pre></div>
+<h3>3.5 StrategyGetBuffer 核心逻辑</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/freelist.c:315-358 */</span>
+
+<span class="pl-c">/* 空闲链表为空时，执行时钟扫描算法 */</span>
+<span class="pl-s1">trycounter</span> <span class="pl-c1">=</span> <span class="pl-s1">NBuffers</span>;
+<span class="pl-k">for</span> (;;)
+{
+    <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">GetBufferDescriptor</span>(<span class="pl-en">ClockSweepTick</span>());
+
+    <span class="pl-c">/*</span>
+<span class="pl-c">     * 如果缓冲区被 pin 或 usagecount 非零，无法使用</span>
+<span class="pl-c">     * 递减 usagecount（如果未被 pin）并继续扫描</span>
+<span class="pl-c">     */</span>
+    <span class="pl-s1">local_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">LockBufHdr</span>(<span class="pl-s1">buf</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">local_buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+    {
+        <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">local_buf_state</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>)
+        {
+            <span class="pl-c">/* 递减 usagecount，给予"第二次机会" */</span>
+            <span class="pl-s1">local_buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+            <span class="pl-s1">trycounter</span> <span class="pl-c1">=</span> <span class="pl-s1">NBuffers</span>;  <span class="pl-c">/* 重置计数器 */</span>
+        }
+        <span class="pl-k">else</span>
+        {
+            <span class="pl-c">/* 找到可用缓冲区 */</span>
+            <span class="pl-k">if</span> (<span class="pl-s1">strategy</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+                <span class="pl-en">AddBufferToRing</span>(<span class="pl-s1">strategy</span>, <span class="pl-s1">buf</span>);
+            <span class="pl-c1">*</span><span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">local_buf_state</span>;
+            <span class="pl-k">return</span> <span class="pl-s1">buf</span>;
+        }
+    }
+    <span class="pl-k">else</span> <span class="pl-k">if</span> (<span class="pl-c1">--</span><span class="pl-s1">trycounter</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c">/* 所有缓冲区都被 pin，报错 */</span>
+        <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">local_buf_state</span>);
+        <span class="pl-en">elog</span>(<span class="pl-c1">ERROR</span>, <span class="pl-s">"no unpinned buffers available"</span>);
+    }
+    <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">local_buf_state</span>);
+}</pre></div>
+<h2>4. UsageCount 生命周期</h2>
+<h3>4.1 生命周期图解</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2"><img width="1200" height="507" alt="Image" src="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2" style="max-width: 100%; height: auto; max-height: 507px;"></a></p>
+<h3>4.2 操作时机</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>操作</th>
+<th>时机</th>
+<th>函数</th>
+<th>行号</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>初始化为 1</strong></td>
+<td>缓冲区被分配给新页面</td>
+<td><code class="notranslate">BufferAlloc()</code></td>
+<td>bufmgr.c:1428</td>
+</tr>
+<tr>
+<td><strong>递增</strong></td>
+<td>首次 Pin 缓冲区时</td>
+<td><code class="notranslate">PinBuffer()</code></td>
+<td>bufmgr.c:1719-1733</td>
+</tr>
+<tr>
+<td><strong>递减</strong></td>
+<td>Clock Sweep 扫描时</td>
+<td><code class="notranslate">StrategyGetBuffer()</code></td>
+<td>freelist.c:329-331</td>
+</tr>
+<tr>
+<td><strong>重置</strong></td>
+<td>缓冲区被重新分配</td>
+<td><code class="notranslate">BufferAlloc()</code></td>
+<td>bufmgr.c:1408-1430</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>4.3 增加 UsageCount - PinBuffer()</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件: src/backend/storage/buffer/bufmgr.c:1692-1771 */</span>
+<span class="pl-k">static</span> <span class="pl-smi">bool</span>
+<span class="pl-en">PinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>)
+{
+    <span class="pl-c">// ... 省略前序代码 ...</span>
+
+    <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+    <span class="pl-k">for</span> (;;)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+            <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+
+        <span class="pl-c">/* 增加 refcount */</span>
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+        <span class="pl-k">if</span> (<span class="pl-s1">strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+        {
+            <span class="pl-c">/* 默认情况：除非已达最大值，否则增加 usagecount */</span>
+            <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>)
+                <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+        }
+        <span class="pl-k">else</span>
+        {
+            <span class="pl-c">/*</span>
+<span class="pl-c">             * 环形缓冲区不应淘汰其他缓冲区。</span>
+<span class="pl-c">             * 因此我们不让 usagecount 超过 1。</span>
+<span class="pl-c">             */</span>
+            <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+                <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+        }
+
+        <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>,
+                                           <span class="pl-s1">buf_state</span>))
+        {
+            <span class="pl-s1">result</span> <span class="pl-c1">=</span> (<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_VALID</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+            <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+            <span class="pl-k">break</span>;
+        }
+    }
+    <span class="pl-c">// ... 省略后续代码 ...</span>
+}</pre></div>
+<p><strong>关键点</strong>:</p>
+<ul>
+<li>使用 CAS（Compare-And-Swap）循环确保原子性</li>
+<li>正常策略下：usage_count &lt; 5 时递增</li>
+<li>环形缓冲区策略：usage_count 最大为 1</li>
+</ul>
+<h3>4.4 重置 UsageCount</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件: src/backend/storage/buffer/bufmgr.c:1422-1428 */</span>
+<span class="pl-c">/*</span>
+<span class="pl-c"> * 我们也重置 usage_count，因为旧内容的任何最近使用</span>
+<span class="pl-c"> * 都不再相关。（usage_count 从 1 开始，以便缓冲区</span>
+<span class="pl-c"> * 可以在一次时钟扫描传递中存活。）</span>
+<span class="pl-c"> */</span>
+<span class="pl-s1">buf_state</span> &amp;= ~(<span class="pl-c1">BM_VALID</span> | <span class="pl-c1">BM_DIRTY</span> | <span class="pl-c1">BM_JUST_DIRTIED</span> |
+               <span class="pl-c1">BM_CHECKPOINT_NEEDED</span> | <span class="pl-c1">BM_IO_ERROR</span> | <span class="pl-c1">BM_PERMANENT</span> |
+               <span class="pl-c1">BUF_USAGECOUNT_MASK</span>);
+<span class="pl-k">if</span> (<span class="pl-s1">relpersistence</span> <span class="pl-c1">==</span> <span class="pl-c1">RELPERSISTENCE_PERMANENT</span> <span class="pl-c1">||</span> <span class="pl-s1">forkNum</span> <span class="pl-c1">==</span> <span class="pl-c1">INIT_FORKNUM</span>)
+    <span class="pl-s1">buf_state</span> |= <span class="pl-c1">BM_TAG_VALID</span> | <span class="pl-c1">BM_PERMANENT</span> | <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+<span class="pl-k">else</span>
+    <span class="pl-s1">buf_state</span> |= <span class="pl-c1">BM_TAG_VALID</span> | <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;</pre></div>
+<p><strong>设计意图</strong>:</p>
+<ul>
+<li>新加载的页面初始 usage_count = 1</li>
+<li>允许页面在缓冲区中至少存活一次完整的时钟扫描</li>
+</ul>
+<h3>4.5 UnpinBuffer 不修改 UsageCount</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/bufmgr.c:1840-1890 */</span>
+<span class="pl-k">static</span> <span class="pl-smi">void</span>
+<span class="pl-en">UnpinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">bool</span> <span class="pl-s1">fixOwner</span>)
+{
+    <span class="pl-c">// ... 省略前序代码 ...</span>
+
+    <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+    <span class="pl-k">for</span> (;;)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+            <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+
+        <span class="pl-c">/* 仅减少 refcount，不影响 usagecount */</span>
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+        <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>,
+                                           <span class="pl-s1">buf_state</span>))
+            <span class="pl-k">break</span>;
+    }
+    <span class="pl-c">// ... 省略后续代码 ...</span>
+}</pre></div>
+<h3>4.6 环形缓冲区策略</h3>
+<p>使用环形缓冲区（如顺序扫描、VACUUM）时，usagecount 限制为最大 1：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/bufmgr.c:1726-1733 */</span>
+
+<span class="pl-s1">else</span>
+{
+    <span class="pl-c">/*</span>
+<span class="pl-c">     * Ring buffers shouldn't evict others from pool.  Thus we</span>
+<span class="pl-c">     * don't make usagecount more than 1.</span>
+<span class="pl-c">     */</span>
+    <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+}</pre></div>
+<h3>4.7 本地缓冲区（临时表）</h3>
+<p>本地缓冲区也使用相同的 usagecount 机制：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/localbuf.c:141-148 */</span>
+
+<span class="pl-c">/* this part is equivalent to PinBuffer for a shared buffer */</span>
+<span class="pl-k">if</span> (<span class="pl-s1">LocalRefCount</span>[<span class="pl-s1">b</span>] <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+{
+    <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>)
+    {
+        <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+        <span class="pl-en">pg_atomic_unlocked_write_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">bufHdr</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>, <span class="pl-s1">buf_state</span>);
+    }
+}</pre></div>
+<h2>5. 环形缓冲区与 usagecount</h2>
+<h3>5.1 环形缓冲区的设计目的</h3>
+<p>环形缓冲区是为了处理以下场景设计的，对于顺序扫描（如 VACUUM、COPY），PostgreSQL 使用缓冲区环形策略：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>策略类型</th>
+<th>环大小</th>
+<th>适用场景</th>
+<th>UsageCount 行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BAS_BULKREAD</td>
+<td>256KB (32 buffers)</td>
+<td>顺序扫描</td>
+<td>限制为 1</td>
+</tr>
+<tr>
+<td>BAS_BULKWRITE</td>
+<td>16MB</td>
+<td>COPY IN, CREATE TABLE AS SELECT</td>
+<td>限制为 1</td>
+</tr>
+<tr>
+<td>BAS_VACUUM</td>
+<td>256KB</td>
+<td>VACUUM 操作</td>
+<td>限制为 1</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>这些操作会访问大量页面但只访问一次，如果使用普通策略会"冲刷"整个缓冲池，所以分配了专门的缓存区和限制了usage_count数。</p>
+<p><strong>设计意图</strong>: 防止大扫描"污染"缓冲池，同时保持少量缓存以支持同步扫描。</p>
+<h3>5.2 环形缓冲区的 usagecount 检查</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/freelist.c:634-651 */</span>
+
+<span class="pl-c">/*</span>
+<span class="pl-c"> * If usage_count is 0 or 1 then the buffer is fair game (we expect 1,</span>
+<span class="pl-c"> * since our own previous usage of the ring element would have left it</span>
+<span class="pl-c"> * there, but it might've been decremented by clock sweep since then). A</span>
+<span class="pl-c"> * higher usage_count indicates someone else has touched the buffer, so we</span>
+<span class="pl-c"> * shouldn't re-use it.</span>
+<span class="pl-c"> */</span>
+<span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">GetBufferDescriptor</span>(<span class="pl-s1">bufnum</span> <span class="pl-c1">-</span> <span class="pl-c1">1</span>);
+<span class="pl-s1">local_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">LockBufHdr</span>(<span class="pl-s1">buf</span>);
+<span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">local_buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>
+    <span class="pl-c1">&amp;&amp;</span> <span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">local_buf_state</span>) &lt;= <span class="pl-c1">1</span>)
+{
+    <span class="pl-s1">strategy</span><span class="pl-c1">-&gt;</span><span class="pl-c1">current_was_in_ring</span> <span class="pl-c1">=</span> true;
+    <span class="pl-c1">*</span><span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">local_buf_state</span>;
+    <span class="pl-k">return</span> <span class="pl-s1">buf</span>;
+}</pre></div>
+<p><strong>设计意图</strong>：</p>
+<ul>
+<li>Ring 策略限制 usage_count 最大为 1</li>
+<li>如果其他进程访问了 ring 中的缓冲区，usage_count 会 &gt; 1</li>
+<li>此时 ring 策略将跳过该缓冲区，避免影响其他进程的缓存</li>
+</ul>
+<h2>6. 后台写进程与 usagecount</h2>
+<p>后台写进程（Background Writer）使用 usagecount 来判断缓冲区是否可能被很快回收：</p>
+<pre class="notranslate"><code class="notranslate">/* 源文件：src/backend/storage/buffer/README:252-257 */
+
+The background writer is designed to write out pages that are likely to be
+recycled soon, thereby offloading the writing work from active backends.
+To do this, it scans forward circularly from the current position of
+nextVictimBuffer (which it does not change!), looking for buffers that are
+dirty and not pinned nor marked with a positive usage count.
+</code></pre>
+<p>后台写进程会写出那些：</p>
+<ul>
+<li><strong>脏页</strong>（dirty）</li>
+<li><strong>未被 pin</strong>（refcount == 0）</li>
+<li><strong>usagecount == 0</strong> 的缓冲区</li>
+</ul>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/bufmgr.c:2536-2548 */</span>
+<span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">LockBufHdr</span>(<span class="pl-s1">bufHdr</span>);
+
+<span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span> <span class="pl-c1">&amp;&amp;</span>
+    <span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+{
+    <span class="pl-s1">result</span> |= <span class="pl-c1">BUF_REUSABLE</span>;  <span class="pl-c">// 标记为可替换</span>
+}
+<span class="pl-k">else</span> <span class="pl-k">if</span> (<span class="pl-s1">skip_recently_used</span>)
+{
+    <span class="pl-c">/* Caller told us not to write recently-used buffers */</span>
+    <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">bufHdr</span>, <span class="pl-s1">buf_state</span>);
+    <span class="pl-k">return</span> <span class="pl-s1">result</span>;
+}</pre></div>
+<h2>7. 调用链分析</h2>
+<h3>7.1 usagecount 增加调用链</h3>
+<pre class="notranslate"><code class="notranslate">ReadBuffer / ReadBufferExtended
+    └─&gt; ReadBuffer_common
+        └─&gt; BufferAlloc
+            └─&gt; PinBuffer                    [bufmgr.c:1692-1771]
+                └─&gt; buf_state += BUF_USAGECOUNT_ONE  [首次 pin 时增加]
+
+或者
+
+LocalBufferAlloc                            [localbuf.c:108-161]
+    └─&gt; buf_state += BUF_USAGECOUNT_ONE     [首次本地 pin 时增加]
+</code></pre>
+<h3>7.2 usagecount 减少调用链</h3>
+<pre class="notranslate"><code class="notranslate">StrategyGetBuffer                           [freelist.c:200-358]
+    └─&gt; ClockSweepTick                      [获取下一个候选缓冲区]
+    └─&gt; local_buf_state -= BUF_USAGECOUNT_ONE  [时钟扫描递减]
+
+或者
+
+LocalBufferAlloc                            [localbuf.c:174-206]
+    └─&gt; buf_state -= BUF_USAGECOUNT_ONE     [本地时钟扫描递减]
+</code></pre>
+<p>源文件位置总结</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>源文件</th>
+<th>路径</th>
+<th>功能</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>buf_internals.h</strong></td>
+<td><code class="notranslate">include/storage/buf_internals.h</code></td>
+<td>BufferDesc 结构、常量定义、宏</td>
+</tr>
+<tr>
+<td><strong>bufmgr.c</strong></td>
+<td><code class="notranslate">backend/storage/buffer/bufmgr.c</code></td>
+<td>PinBuffer、BufferAlloc、SyncOneBuffer</td>
+</tr>
+<tr>
+<td><strong>freelist.c</strong></td>
+<td><code class="notranslate">backend/storage/buffer/freelist.c</code></td>
+<td>StrategyGetBuffer、ClockSweepTick、Ring 管理</td>
+</tr>
+<tr>
+<td><strong>localbuf.c</strong></td>
+<td><code class="notranslate">backend/storage/buffer/localbuf.c</code></td>
+<td>本地缓冲区的 usage_count 处理</td>
+</tr>
+<tr>
+<td><strong>README</strong></td>
+<td><code class="notranslate">backend/storage/buffer/README</code></td>
+<td>缓冲区管理算法文档</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h2>8. 性能考量</h2>
+<h3>8.1 为什么选择 5 作为最大值？</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>usagecount 最大值</th>
+<th>近似算法</th>
+<th>最坏情况扫描周期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>FIFO</td>
+<td>2 周期</td>
+</tr>
+<tr>
+<td>5</td>
+<td>近似 LRU</td>
+<td>6 周期</td>
+</tr>
+<tr>
+<td>NBuffers</td>
+<td>精确 LRU</td>
+<td>NBuffers+1 周期</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>选择 5 的原因：</p>
+<ul>
+<li>提供足够的"第二次机会"来保护热数据</li>
+<li>限制最坏情况下的扫描开销</li>
+<li>经验值，在大多数工作负载下表现良好</li>
+</ul>
+<h3>8.2 原子操作优化</h3>
+<p>将 usagecount 与 refcount、flags 合并的好处：</p>
+<ol>
+<li><strong>单次 CAS 更新</strong>：pin 操作可以同时更新 refcount 和 usagecount</li>
+<li><strong>减少内存访问</strong>：32 位状态变量可以在单个缓存行内处理</li>
+<li><strong>无锁读取</strong>：状态检查不需要获取自旋锁</li>
+</ol>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/storage/buffer/bufmgr.c:1735-1737 */</span>
+
+<span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>,
+                                   <span class="pl-s1">buf_state</span>))
+{
+    <span class="pl-s1">result</span> <span class="pl-c1">=</span> (<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_VALID</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+    <span class="pl-k">break</span>;
+}</pre></div>
+<h3>8.3 缓存行对齐</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:195-221 */</span>
+<span class="pl-c">/*</span>
+<span class="pl-c"> * Concurrent access to buffer headers has proven to be more efficient if</span>
+<span class="pl-c"> * they're cache line aligned. So we force the start of the BufferDescriptors</span>
+<span class="pl-c"> * array to be on a cache line boundary and force the elements to be cache</span>
+<span class="pl-c"> * line sized.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * XXX: As this is primarily matters in highly concurrent workloads which</span>
+<span class="pl-c"> * probably all are 64bit these days, and the space wastage would be a bit</span>
+<span class="pl-c"> * more noticeable on 32bit systems, we don't force the stride to be cache</span>
+<span class="pl-c"> * line sized on those. If somebody does actual performance testing, we can</span>
+<span class="pl-c"> * reevaluate.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * Note that local buffer descriptors aren't forced to be aligned - as there's</span>
+<span class="pl-c"> * no concurrent access to those it's unlikely to be beneficial.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * We use a 64-byte cache line size here, because that's the most common</span>
+<span class="pl-c"> * size. Making it bigger would be a waste of memory. Even if running on a</span>
+<span class="pl-c"> * platform with either 32 or 128 byte line sizes, it's good to align to</span>
+<span class="pl-c"> * boundaries and avoid false sharing.</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">BUFFERDESC_PAD_TO_SIZE</span>  (SIZEOF_VOID_P == 8 ? 64 : 1)
+
+<span class="pl-k">typedef</span> <span class="pl-k">union</span> <span class="pl-smi">BufferDescPadded</span>
+{
+    <span class="pl-smi">BufferDesc</span>  <span class="pl-c1">bufferdesc</span>;
+    <span class="pl-smi">char</span>        <span class="pl-c1">pad</span>[<span class="pl-c1">BUFFERDESC_PAD_TO_SIZE</span>];
+} <span class="pl-smi">BufferDescPadded</span>;</pre></div>
+<p>确保每个 BufferDesc 占用独立的缓存行（64 字节），避免伪共享（false sharing）。</p>
+<h2>9. 查看 usagecount</h2>
+<h3>9.1 pg_buffercache 扩展</h3>
+<p>PostgreSQL 提供了 <code class="notranslate">pg_buffercache</code> 扩展来查看缓冲区状态：</p>
+<div class="highlight highlight-source-sql"><pre class="notranslate"><span class="pl-c"><span class="pl-c">--</span> 安装扩展</span>
+CREATE EXTENSION pg_buffercache;
+
+<span class="pl-c"><span class="pl-c">--</span> 查看所有缓冲区的 usagecount 分布</span>
+<span class="pl-k">SELECT</span> usagecount, <span class="pl-c1">count</span>(<span class="pl-k">*</span>)
+<span class="pl-k">FROM</span> pg_buffercache
+<span class="pl-k">GROUP BY</span> usagecount
+<span class="pl-k">ORDER BY</span> usagecount;
+
+<span class="pl-c"><span class="pl-c">--</span> 查看特定表的缓冲区使用情况</span>
+<span class="pl-k">SELECT</span> <span class="pl-c1">c</span>.<span class="pl-c1">relname</span>, <span class="pl-c1">b</span>.<span class="pl-c1">usagecount</span>, <span class="pl-c1">count</span>(<span class="pl-k">*</span>)
+<span class="pl-k">FROM</span> pg_buffercache b
+<span class="pl-k">JOIN</span> pg_class c <span class="pl-k">ON</span> <span class="pl-c1">b</span>.<span class="pl-c1">relfilenode</span> <span class="pl-k">=</span> pg_relation_filenode(<span class="pl-c1">c</span>.<span class="pl-c1">oid</span>)
+<span class="pl-k">WHERE</span> <span class="pl-c1">c</span>.<span class="pl-c1">relname</span> <span class="pl-k">=</span> <span class="pl-s"><span class="pl-pds">'</span>your_table_name<span class="pl-pds">'</span></span>
+<span class="pl-k">GROUP BY</span> <span class="pl-c1">c</span>.<span class="pl-c1">relname</span>, <span class="pl-c1">b</span>.<span class="pl-c1">usagecount</span>
+<span class="pl-k">ORDER BY</span> <span class="pl-c1">b</span>.<span class="pl-c1">usagecount</span>;</pre></div>
+<h3>9.2 扩展实现</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：contrib/pg_buffercache/pg_buffercache_pages.c:161 */</span>
+
+<span class="pl-s1">fctx</span><span class="pl-c1">-&gt;</span><span class="pl-c1">record</span>[<span class="pl-s1">i</span>].<span class="pl-c1">usagecount</span> <span class="pl-c1">=</span> <span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>);</pre></div>
+<h2>10. 总结</h2>
+<p>PostgreSQL 的 usagecount 机制是缓冲区管理的核心组件，它通过以下方式实现高效的缓冲区替换：</p>
+<ol>
+<li>
+<p><strong>近似 LRU 的简化实现</strong>：使用 4 位存储 usage_count，最大值为 5，避免了传统 LRU 算法的复杂链表维护开销，同时保留了足够的使用频率区分能力。</p>
+</li>
+<li>
+<p><strong>原子操作的高效并发</strong>：将 usage_count 与 refcount、flags 打包在单个 32 位原子变量中，通过 CAS (Compare-And-Swap) 循环实现无锁并发访问，大幅提升多核环境下的性能。</p>
+</li>
+<li>
+<p><strong>批量操作的缓存隔离</strong>：Ring 策略通过限制 usage_count ≤ 1，确保 VACUUM、顺序扫描等批量操作不会"污染"整个缓冲池，这是数据库系统中非常精妙的性能优化技巧。</p>
+</li>
+</ol>
+<h2>参考资料</h2>
+<ul>
+<li>PostgreSQL 14.4 源代码</li>
+<li><code class="notranslate">src/include/storage/buf_internals.h</code> - 数据结构定义</li>
+<li><code class="notranslate">src/backend/storage/buffer/freelist.c</code> - 时钟扫描算法实现</li>
+<li><code class="notranslate">src/backend/storage/buffer/bufmgr.c</code> - 缓冲区管理核心逻辑</li>
+<li><code class="notranslate">src/backend/storage/buffer/README</code> - 缓冲区管理文档</li>
+</ul></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
