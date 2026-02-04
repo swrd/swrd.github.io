@@ -441,23 +441,23 @@ flowchart TD
 **代码示例**:
 
 ```c
-// 在 heapam.c 中，SeqScan 初始化时创建策略
-static void
-table_beginscan_serializable(TableScanDesc scan, ...)
+/* 源文件：src/backend/access/heap/heapam.c:275-280 */
+/*
+ * If the table is large relative to NBuffers, use a bulk-read access
+ * strategy and enable synchronized scanning...
+ */
+if (!RelationUsesLocalBuffers(scan->rs_base.rs_rd) &&
+    scan->rs_nblocks > NBuffers / 4)
 {
-    // ...
-    if (flags & SO_TYPE_SEQSCAN)
-        scan->rs_strategy = GetAccessStrategy(BAS_BULKREAD);
-    // ...
+    allow_strat = (scan->rs_base.rs_flags & SO_ALLOW_STRAT) != 0;
+    allow_sync = (scan->rs_base.rs_flags & SO_ALLOW_SYNC) != 0;
 }
 
-// 扫描过程中使用策略读取 buffer
-heapgettup_pagemode(scan, ...)
+if (allow_strat)
 {
-    // ...
-    buf = ReadBufferExtended(scan->rs_rd, MAIN_FORKNUM, page,
-                             RBM_NORMAL, scan->rs_strategy);
-    // ...
+    /* During a rescan, keep the previous strategy object. */
+    if (scan->rs_strategy == NULL)
+        scan->rs_strategy = GetAccessStrategy(BAS_BULKREAD);
 }
 ```
 

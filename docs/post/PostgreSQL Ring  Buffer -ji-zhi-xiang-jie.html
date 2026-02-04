@@ -579,23 +579,23 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li>脏页会被移除以避免无限循环</li>
 </ul>
 <p><strong>代码示例</strong>:</p>
-<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// 在 heapam.c 中，SeqScan 初始化时创建策略</span>
-<span class="pl-k">static</span> <span class="pl-smi">void</span>
-<span class="pl-en">table_beginscan_serializable</span>(<span class="pl-smi">TableScanDesc</span> <span class="pl-s1">scan</span>, ...)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/access/heap/heapam.c:275-280 */</span>
+<span class="pl-c">/*</span>
+<span class="pl-c"> * If the table is large relative to NBuffers, use a bulk-read access</span>
+<span class="pl-c"> * strategy and enable synchronized scanning...</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">if</span> (!<span class="pl-en">RelationUsesLocalBuffers</span>(<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_rd</span>) <span class="pl-c1">&amp;&amp;</span>
+    <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_nblocks</span> <span class="pl-c1">&gt;</span> <span class="pl-s1">NBuffers</span> / <span class="pl-c1">4</span>)
 {
-    <span class="pl-c">// ...</span>
-    <span class="pl-k">if</span> (<span class="pl-s1">flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_TYPE_SEQSCAN</span>)
-        <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">=</span> <span class="pl-en">GetAccessStrategy</span>(<span class="pl-c1">BAS_BULKREAD</span>);
-    <span class="pl-c">// ...</span>
+    <span class="pl-s1">allow_strat</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_STRAT</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+    <span class="pl-s1">allow_sync</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_SYNC</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
 }
 
-<span class="pl-c">// 扫描过程中使用策略读取 buffer</span>
-<span class="pl-s1">heapgettup_pagemode</span>(<span class="pl-s1">scan</span>, ...)
+<span class="pl-k">if</span> (<span class="pl-s1">allow_strat</span>)
 {
-    <span class="pl-c">// ...</span>
-    <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">ReadBufferExtended</span>(<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_rd</span>, <span class="pl-c1">MAIN_FORKNUM</span>, <span class="pl-s1">page</span>,
-                             <span class="pl-c1">RBM_NORMAL</span>, <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span>);
-    <span class="pl-c">// ...</span>
+    <span class="pl-c">/* During a rescan, keep the previous strategy object. */</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">=</span> <span class="pl-en">GetAccessStrategy</span>(<span class="pl-c1">BAS_BULKREAD</span>);
 }</pre></div>
 <p><strong>优势</strong>:</p>
 <ol>
