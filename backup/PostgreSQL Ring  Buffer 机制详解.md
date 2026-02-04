@@ -441,24 +441,33 @@ flowchart TD
 **代码示例**:
 
 ```c
-/* 源文件：src/backend/access/heap/heapam.c:275-280 */
+/* 源文件：src/backend/access/heap/heapam.c:254-280 */
 /*
- * If the table is large relative to NBuffers, use a bulk-read access
- * strategy and enable synchronized scanning...
- */
-if (!RelationUsesLocalBuffers(scan->rs_base.rs_rd) &&
-    scan->rs_nblocks > NBuffers / 4)
-{
-    allow_strat = (scan->rs_base.rs_flags & SO_ALLOW_STRAT) != 0;
-    allow_sync = (scan->rs_base.rs_flags & SO_ALLOW_SYNC) != 0;
-}
-
-if (allow_strat)
-{
-    /* During a rescan, keep the previous strategy object. */
-    if (scan->rs_strategy == NULL)
-        scan->rs_strategy = GetAccessStrategy(BAS_BULKREAD);
-}
+     * If the table is large relative to NBuffers, use a bulk-read access
+     * strategy and enable synchronized scanning (see syncscan.c).  Although
+     * the thresholds for these features could be different, we make them the
+     * same so that there are only two behaviors to tune rather than four.
+     * (However, some callers need to be able to disable one or both of these
+     * behaviors, independently of the size of the table; also there is a GUC
+     * variable that can disable synchronized scanning.)
+     *
+     * Note that table_block_parallelscan_initialize has a very similar test;
+     * if you change this, consider changing that one, too.
+     */
+    if (!RelationUsesLocalBuffers(scan->rs_base.rs_rd) &&
+        scan->rs_nblocks > NBuffers / 4)
+    {
+        allow_strat = (scan->rs_base.rs_flags & SO_ALLOW_STRAT) != 0;
+        allow_sync = (scan->rs_base.rs_flags & SO_ALLOW_SYNC) != 0;
+    }
+    else
+        allow_strat = allow_sync = false;
+    if (allow_strat)
+    {
+        /* During a rescan, keep the previous strategy object. */
+        if (scan->rs_strategy == NULL)
+            scan->rs_strategy = GetAccessStrategy(BAS_BULKREAD);
+    }
 ```
 
 **优势**:

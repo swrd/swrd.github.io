@@ -579,24 +579,33 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li>脏页会被移除以避免无限循环</li>
 </ul>
 <p><strong>代码示例</strong>:</p>
-<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/access/heap/heapam.c:275-280 */</span>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/backend/access/heap/heapam.c:254-280 */</span>
 <span class="pl-c">/*</span>
-<span class="pl-c"> * If the table is large relative to NBuffers, use a bulk-read access</span>
-<span class="pl-c"> * strategy and enable synchronized scanning...</span>
-<span class="pl-c"> */</span>
-<span class="pl-k">if</span> (!<span class="pl-en">RelationUsesLocalBuffers</span>(<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_rd</span>) <span class="pl-c1">&amp;&amp;</span>
-    <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_nblocks</span> <span class="pl-c1">&gt;</span> <span class="pl-s1">NBuffers</span> / <span class="pl-c1">4</span>)
-{
-    <span class="pl-s1">allow_strat</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_STRAT</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
-    <span class="pl-s1">allow_sync</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_SYNC</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
-}
-
-<span class="pl-k">if</span> (<span class="pl-s1">allow_strat</span>)
-{
-    <span class="pl-c">/* During a rescan, keep the previous strategy object. */</span>
-    <span class="pl-k">if</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
-        <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">=</span> <span class="pl-en">GetAccessStrategy</span>(<span class="pl-c1">BAS_BULKREAD</span>);
-}</pre></div>
+<span class="pl-c">     * If the table is large relative to NBuffers, use a bulk-read access</span>
+<span class="pl-c">     * strategy and enable synchronized scanning (see syncscan.c).  Although</span>
+<span class="pl-c">     * the thresholds for these features could be different, we make them the</span>
+<span class="pl-c">     * same so that there are only two behaviors to tune rather than four.</span>
+<span class="pl-c">     * (However, some callers need to be able to disable one or both of these</span>
+<span class="pl-c">     * behaviors, independently of the size of the table; also there is a GUC</span>
+<span class="pl-c">     * variable that can disable synchronized scanning.)</span>
+<span class="pl-c">     *</span>
+<span class="pl-c">     * Note that table_block_parallelscan_initialize has a very similar test;</span>
+<span class="pl-c">     * if you change this, consider changing that one, too.</span>
+<span class="pl-c">     */</span>
+    <span class="pl-k">if</span> (!<span class="pl-en">RelationUsesLocalBuffers</span>(<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_rd</span>) <span class="pl-c1">&amp;&amp;</span>
+        <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_nblocks</span> <span class="pl-c1">&gt;</span> <span class="pl-s1">NBuffers</span> / <span class="pl-c1">4</span>)
+    {
+        <span class="pl-s1">allow_strat</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_STRAT</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+        <span class="pl-s1">allow_sync</span> <span class="pl-c1">=</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_base</span>.<span class="pl-c1">rs_flags</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">SO_ALLOW_SYNC</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+    }
+    <span class="pl-k">else</span>
+        <span class="pl-s1">allow_strat</span> <span class="pl-c1">=</span> <span class="pl-s1">allow_sync</span> <span class="pl-c1">=</span> false;
+    <span class="pl-k">if</span> (<span class="pl-s1">allow_strat</span>)
+    {
+        <span class="pl-c">/* During a rescan, keep the previous strategy object. */</span>
+        <span class="pl-k">if</span> (<span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+            <span class="pl-s1">scan</span><span class="pl-c1">-&gt;</span><span class="pl-c1">rs_strategy</span> <span class="pl-c1">=</span> <span class="pl-en">GetAccessStrategy</span>(<span class="pl-c1">BAS_BULKREAD</span>);
+    }</pre></div>
 <p><strong>优势</strong>:</p>
 <ol>
 <li><strong>避免污染缓冲池</strong>: 大表扫描只使用 Ring 内的缓冲区，不会频繁逐出全局缓冲池中的热数据</li>
