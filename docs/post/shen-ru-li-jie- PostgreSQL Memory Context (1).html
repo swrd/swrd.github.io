@@ -1,0 +1,1935 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    <script src='https://blog.meekdai.com/Gmeek/plugins/GmeekVercount.js'></script>
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/5057571?s=96&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="
+> 之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。">
+<meta property="og:title" content="深入理解 PostgreSQL Memory Context (1)">
+<meta property="og:description" content="
+> 之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://swrd.github.io/post/shen-ru-li-jie-%20PostgreSQL%20Memory%20Context%20%281%29.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<title>深入理解 PostgreSQL Memory Context (1)</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">深入理解 PostgreSQL Memory Context (1)</h1>
+<div class="title-right">
+    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/15" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><blockquote>
+<p>之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。文中代码均基于pg 14.4分析。</p>
+</blockquote>
+<hr>
+<h2>一、概述与架构总览</h2>
+<h3>1.1 核心问题</h3>
+<p>为什么内存的申请/释放可以通过 Memory Context？Memory Context 和内存管理之间是什么关系？</p>
+<h3>1.2 回答</h3>
+<p>Memory Context 是 PostgreSQL 在 C 标准库 <code class="notranslate">malloc/free</code> 之上构建的一层抽象内存管理框架。它不替代 <code class="notranslate">malloc/free</code>，而是通过树形上下文结构、虚函数表和反向指针，将零散的 <code class="notranslate">malloc/free</code> 调用组织为按作用域批量管理的模式，解决手动内存管理的泄漏问题。</p>
+<h3>1.3 四层架构</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5e629228-741e-44b0-a513-9cc04622a227"><img width="1200" height="849" alt="Image" src="https://github.com/user-attachments/assets/5e629228-741e-44b0-a513-9cc04622a227" style="max-width: 100%; height: auto; max-height: 849px;; aspect-ratio: 1200 / 849; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>层次</th>
+<th>职责</th>
+<th>关键文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>用户 API 层</strong></td>
+<td>提供类 malloc/free 接口</td>
+<td><code class="notranslate">palloc.h</code></td>
+</tr>
+<tr>
+<td><strong>抽象管理层</strong></td>
+<td>上下文树管理、分配路由</td>
+<td><code class="notranslate">mcxt.c</code>, <code class="notranslate">memnodes.h</code></td>
+</tr>
+<tr>
+<td><strong>具体实现层</strong></td>
+<td>实际内存分配策略</td>
+<td><code class="notranslate">aset.c</code>, <code class="notranslate">slab.c</code>, <code class="notranslate">generation.c</code></td>
+</tr>
+<tr>
+<td><strong>OS 内存层</strong></td>
+<td>最终的 malloc/free 调用</td>
+<td>C 标准库</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>1.4 Memory Context 与 malloc/free 的关系</h3>
+<pre class="notranslate"><code class="notranslate">Memory Context ≠ 替代 malloc/free
+Memory Context = 在 malloc/free 之上构建的管理框架
+
+┌─────────────────────────────────┐
+│  用户代码: palloc / pfree        │ ← 不直接接触 malloc/free
+├─────────────────────────────────┤
+│  Memory Context 抽象层           │ ← 上下文管理、路由
+├─────────────────────────────────┤
+│  AllocSet / Slab / Generation   │ ← 池化、空闲链表优化
+├─────────────────────────────────┤
+│  malloc / free / realloc        │ ← 最终的 OS 内存操作
+└─────────────────────────────────┘
+</code></pre>
+<p>Memory Context 最终还是要调用 <code class="notranslate">malloc/free</code>，但它在上面加了三层管理：</p>
+<ol>
+<li><strong>池化</strong>：AllocSet 从 OS 申请大块内存，内部切分为小 chunk 供 palloc 使用</li>
+<li><strong>作用域</strong>：树形 context 将分配与生命周期绑定，reset 即释放</li>
+<li><strong>路由</strong>：虚函数表支持不同分配策略，无需修改上层代码</li>
+</ol>
+<hr>
+<h2>二、核心数据结构</h2>
+<h3>2.1 MemoryContextData — 抽象基类</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/nodes/memnodes.h:78-93 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">MemoryContextData</span>
+{
+    <span class="pl-smi">NodeTag</span>     <span class="pl-c1">type</span>;               <span class="pl-c">/* 节点类型标识 T_AllocSetContext 等 */</span>
+    <span class="pl-smi">bool</span>        <span class="pl-c1">isReset</span>;            <span class="pl-c">/* 自上次 Reset 后是否无分配 */</span>
+    <span class="pl-smi">bool</span>        <span class="pl-c1">allowInCritSection</span>; <span class="pl-c">/* 是否允许在临界区中 palloc */</span>
+    <span class="pl-smi">Size</span>        <span class="pl-c1">mem_allocated</span>;      <span class="pl-c">/* 跟踪此上下文分配的总内存 */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">MemoryContextMethods</span> <span class="pl-c1">*</span><span class="pl-c1">methods</span>; <span class="pl-c">/* 虚函数表 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">parent</span>;           <span class="pl-c">/* 父上下文 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">firstchild</span>;       <span class="pl-c">/* 第一个子上下文 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">prevchild</span>;        <span class="pl-c">/* 前一个兄弟上下文 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">nextchild</span>;        <span class="pl-c">/* 后一个兄弟上下文 */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">char</span>  <span class="pl-c1">*</span><span class="pl-c1">name</span>;             <span class="pl-c">/* 上下文名称 (调试用) */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">char</span>  <span class="pl-c1">*</span><span class="pl-c1">ident</span>;            <span class="pl-c">/* 上下文标识 (调试用) */</span>
+    <span class="pl-smi">MemoryContextCallback</span> <span class="pl-c1">*</span><span class="pl-c1">reset_cbs</span>; <span class="pl-c">/* Reset/Delete 回调链表 */</span>
+} <span class="pl-smi">MemoryContextData</span>;</pre></div>
+<p><code class="notranslate">MemoryContextData</code> 通过 <code class="notranslate">parent</code>、<code class="notranslate">firstchild</code>、<code class="notranslate">prevchild</code>、<code class="notranslate">nextchild</code> 四个指针字段，构建出一棵双向链表子节点树。</p>
+<p><strong>关键字段说明</strong>：</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/d6ca8bd2-12f7-425f-96ef-08808ff2d825"><img width="1200" height="627" alt="Image" src="https://github.com/user-attachments/assets/d6ca8bd2-12f7-425f-96ef-08808ff2d825" style="max-width: 100%; height: auto; max-height: 627px;; aspect-ratio: 1200 / 627; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>字段</th>
+<th>作用</th>
+<th>设计意图</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">methods</code></td>
+<td>指向虚函数表</td>
+<td>C 语言多态，<code class="notranslate">palloc/pfree</code> 通过此表分发到具体实现</td>
+</tr>
+<tr>
+<td><code class="notranslate">parent / firstchild / prevchild / nextchild</code></td>
+<td>构成上下文父子树</td>
+<td><code class="notranslate">MemoryContextDelete</code> 递归删除子上下文；<code class="notranslate">MemoryContextReset</code> 重置当前及所有子上下文</td>
+</tr>
+<tr>
+<td><code class="notranslate">isReset</code></td>
+<td>快速判断是否为空</td>
+<td>避免不必要的 <code class="notranslate">AllocSetReset</code> 遍历开销</td>
+</tr>
+<tr>
+<td><code class="notranslate">mem_allocated</code></td>
+<td>跟踪 malloc 总量</td>
+<td>用于 <code class="notranslate">MemoryContextStats</code> 统计和内存审计</td>
+</tr>
+<tr>
+<td><code class="notranslate">reset_cbs</code></td>
+<td>回调链表</td>
+<td>context reset/delete 时自动清理非 palloc 资源</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>子上下文的双向链表结构</strong>：</p>
+<pre class="notranslate"><code class="notranslate">parent
+  ├── firstchild ──→ Child A
+  │                    ├── prevchild: NULL (首个子节点)
+  │                    └── nextchild ──→ Child B
+  │                                       ├── prevchild ──→ Child A
+  │                                       └── nextchild: NULL (末尾)
+</code></pre>
+<p><strong>关键操作</strong>：</p>
+<p><strong>1. 添加子节点</strong>（<code class="notranslate">MemoryContextCreate</code>, <code class="notranslate">mcxt.c:814-853</code>）：</p>
+<ul>
+<li>新子节点插入到 <code class="notranslate">parent-&gt;firstchild</code> 位置（头部插入）</li>
+<li>新节点的 <code class="notranslate">nextchild</code> 指向原第一个子节点</li>
+<li>原第一个子节点的 <code class="notranslate">prevchild</code> 指向新节点</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">/* src/backend/utils/mmgr/mcxt.c:838-844 */
+node-&gt;nextchild = parent-&gt;firstchild;
+if (parent-&gt;firstchild != NULL)
+    parent-&gt;firstchild-&gt;prevchild = node;
+parent-&gt;firstchild = node;
+</code></pre>
+<p><strong>2. 摘除子节点</strong>（<code class="notranslate">MemoryContextSetParent</code>, <code class="notranslate">mcxt.c:361-404</code>）：</p>
+<ul>
+<li>更新前后兄弟的 <code class="notranslate">prevchild</code>/<code class="notranslate">nextchild</code> 指针</li>
+<li>如果是第一个子节点，更新父节点的 <code class="notranslate">firstchild</code></li>
+</ul>
+<pre class="notranslate"><code class="notranslate">/* src/backend/utils/mmgr/mcxt.c:375-384 */
+if (context-&gt;prevchild != NULL)
+    context-&gt;prevchild-&gt;nextchild = context-&gt;nextchild;
+else
+    parent-&gt;firstchild = context-&gt;nextchild;
+if (context-&gt;nextchild != NULL)
+    context-&gt;nextchild-&gt;prevchild = context-&gt;prevchild;
+</code></pre>
+<p><strong><code class="notranslate">mem_allocated</code> 字段</strong></p>
+<p>跟踪当前上下文从 <code class="notranslate">malloc()</code> 获取的总内存量。在分配/释放块时更新：</p>
+<pre class="notranslate"><code class="notranslate">/* src/backend/utils/mmgr/aset.c:744 */
+context-&gt;mem_allocated += blksize;   /* 分配块时增加 */
+/* src/backend/utils/mmgr/aset.c:603 */
+context-&gt;mem_allocated -= block-&gt;endptr - ((char *)block);  /* 释放块时减少 */
+</code></pre>
+<h3>2.2 虚函数表 — 接口与实现分离</h3>
+<p>Memory Context 用 C 语言实现了类似 C++ 虚函数的面向对象设计：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/nodes/memnodes.h:58-75 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">MemoryContextMethods</span>
+{
+    <span class="pl-smi">void</span>       <span class="pl-c1">*</span>(<span class="pl-c1">*</span><span class="pl-c1">alloc</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">Size</span> <span class="pl-s1">size</span>);
+    <span class="pl-smi">void</span>        (<span class="pl-c1">*</span><span class="pl-c1">free_p</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>);
+    <span class="pl-smi">void</span>       <span class="pl-c1">*</span>(<span class="pl-c1">*</span><span class="pl-c1">realloc</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>, <span class="pl-smi">Size</span> <span class="pl-s1">size</span>);
+    <span class="pl-smi">void</span>        (<span class="pl-c1">*</span><span class="pl-c1">reset</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">void</span>        (<span class="pl-c1">*</span><span class="pl-c1">delete_context</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">Size</span>        (<span class="pl-c1">*</span><span class="pl-c1">get_chunk_space</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>);
+    <span class="pl-smi">bool</span>        (<span class="pl-c1">*</span><span class="pl-c1">is_empty</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">void</span>        (<span class="pl-c1">*</span><span class="pl-c1">stats</span>) (<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, ...);
+} <span class="pl-smi">MemoryContextMethods</span>;</pre></div>
+<p><code class="notranslate">MemoryContextData</code> 是抽象基类，<code class="notranslate">AllocSetContext</code>、<code class="notranslate">SlabContext</code>、<code class="notranslate">GenerationContext</code> 是具体子类。每个具体上下文类型提供自己的函数指针表。</p>
+<p><strong>调用路由</strong>：当调用 <code class="notranslate">palloc(size)</code> 时：</p>
+<pre class="notranslate"><code class="notranslate">palloc(size)                                          -- mcxt.c:1067
+  └─&gt; context = CurrentMemoryContext
+  └─&gt; ret = context-&gt;methods-&gt;alloc(context, size)    -- 虚函数调用!
+       └─&gt; AllocSetAlloc(context, size)               -- 具体实现
+            └─&gt; 从 block 池中分配 / malloc()
+</code></pre>
+<h3>2.3 反向指针 — pfree/repalloc 的秘密</h3>
+<p><code class="notranslate">pfree(ptr)</code> 只接收一个指针，它怎么知道内存属于哪个上下文？答案是每个已分配的 chunk 在用户数据之前紧邻存储了一个指向所属 MemoryContext 的指针。</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/utils/memutils.h:113-134 */</span>
+<span class="pl-k">static</span> <span class="pl-k">inline</span> <span class="pl-smi">MemoryContext</span>
+<span class="pl-en">GetMemoryChunkContext</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>)
+{
+    <span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>;
+    <span class="pl-en">Assert</span>(<span class="pl-s1">pointer</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">pointer</span> <span class="pl-c1">==</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-en">MAXALIGN</span>(<span class="pl-s1">pointer</span>));
+
+    <span class="pl-c">/* 关键：向前偏移 sizeof(void*) 字节，取出 context 指针 */</span>
+    <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-c1">*</span>(<span class="pl-smi">MemoryContext</span> <span class="pl-c1">*</span>) (((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">pointer</span>) <span class="pl-c1">-</span> <span class="pl-k">sizeof</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span>));
+    <span class="pl-en">AssertArg</span>(<span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>));
+    <span class="pl-k">return</span> <span class="pl-s1">context</span>;
+}</pre></div>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a6f6babe-36ac-452e-a230-c87530c301ed"><img width="1200" height="554" alt="Image" src="https://github.com/user-attachments/assets/a6f6babe-36ac-452e-a230-c87530c301ed" style="max-width: 100%; height: auto; max-height: 554px;; aspect-ratio: 1200 / 554; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><code class="notranslate">pfree</code> 的完整流程：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:1175-1181 */</span>
+<span class="pl-smi">void</span> <span class="pl-en">pfree</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>)
+{
+    <span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-en">GetMemoryChunkContext</span>(<span class="pl-s1">pointer</span>);  <span class="pl-c">/* 反向找到 context */</span>
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">methods</span><span class="pl-c1">-&gt;</span><span class="pl-en">free_p</span>(<span class="pl-s1">context</span>, <span class="pl-s1">pointer</span>);              <span class="pl-c">/* 虚函数调用 */</span>
+}</pre></div>
+<h3>2.4 类型关系与三种分配器</h3>
+<p><code class="notranslate">MemoryContextData</code> 是抽象基类，通过结构体嵌入模拟继承。每种具体实现的第一个字段都是 <code class="notranslate">header: MemoryContextData</code>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:121 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocSetContext</span>
+{
+    <span class="pl-smi">MemoryContextData</span> <span class="pl-c1">header</span>;   <span class="pl-c">/* ← 嵌入的"基类" */</span>
+    <span class="pl-smi">AllocBlock</span>    <span class="pl-c1">blocks</span>;       <span class="pl-c">/* 类型特有字段 */</span>
+    <span class="pl-smi">AllocChunk</span>    <span class="pl-c1">freelist</span>[<span class="pl-c1">11</span>];
+    <span class="pl-c">/* ... */</span>
+} <span class="pl-smi">AllocSetContext</span>;</pre></div>
+<p>通过 C 语言的指针兼容性，<code class="notranslate">AllocSetContext*</code> 可以安全地转换为 <code class="notranslate">MemoryContext</code>（即 <code class="notranslate">MemoryContextData*</code>）。</p>
+<p><strong>虚函数表（多态）</strong></p>
+<p><code class="notranslate">MemoryContextMethods</code> 是一个函数指针表，实现了 C 语言的运行时多态：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/nodes/memnodes.h:58-75 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">MemoryContextMethods</span>
+{
+    <span class="pl-smi">void</span>    <span class="pl-c1">*</span>(<span class="pl-c1">*</span><span class="pl-c1">alloc</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">Size</span> <span class="pl-s1">size</span>);
+    <span class="pl-smi">void</span>     (<span class="pl-c1">*</span><span class="pl-c1">free_p</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>);
+    <span class="pl-smi">void</span>    <span class="pl-c1">*</span>(<span class="pl-c1">*</span><span class="pl-c1">realloc</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>, <span class="pl-smi">Size</span> <span class="pl-s1">size</span>);
+    <span class="pl-smi">void</span>     (<span class="pl-c1">*</span><span class="pl-c1">reset</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">void</span>     (<span class="pl-c1">*</span><span class="pl-c1">delete_context</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">Size</span>     (<span class="pl-c1">*</span><span class="pl-c1">get_chunk_space</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>);
+    <span class="pl-smi">bool</span>     (<span class="pl-c1">*</span><span class="pl-c1">is_empty</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>);
+    <span class="pl-smi">void</span>     (<span class="pl-c1">*</span><span class="pl-c1">stats</span>)(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>, ...);
+} <span class="pl-smi">MemoryContextMethods</span>;</pre></div>
+<p>每种分配器提供自己的 <code class="notranslate">Methods</code> 静态实例：</p>
+<ul>
+<li><code class="notranslate">AllocSetMethods</code>（<code class="notranslate">aset.c:285</code>）</li>
+<li><code class="notranslate">SlabMethods</code>（<code class="notranslate">slab.c:147</code>）</li>
+<li><code class="notranslate">GenerationMethods</code>（<code class="notranslate">generation.c:168</code>）</li>
+</ul>
+<p><strong>类型验证</strong>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/nodes/memnodes.h:104-108 */</span>
+<span class="pl-k">#define</span> <span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>) \
+    ((context) != NULL &amp;&amp; \
+     (IsA((context), AllocSetContext) || \
+      IsA((context), SlabContext) || \
+      IsA((context), GenerationContext)))</pre></div>
+<p><strong>三种分配器对比</strong>：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>特性</th>
+<th>AllocSet (aset.c)</th>
+<th>Slab (slab.c)</th>
+<th>Generation (generation.c)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>适用场景</strong></td>
+<td>通用场景</td>
+<td>等大小对象大量分配</td>
+<td>FIFO/代际分配</td>
+</tr>
+<tr>
+<td><strong>块大小</strong></td>
+<td>倍增（8K→16K→...→maxBlockSize）</td>
+<td>固定</td>
+<td>固定</td>
+</tr>
+<tr>
+<td><strong>空闲管理</strong></td>
+<td>2 的幂 freelists</td>
+<td>块内空闲链表 + 全局分组</td>
+<td>不复用，整块释放</td>
+</tr>
+<tr>
+<td><strong>碎片控制</strong></td>
+<td>可能浪费最多 50%</td>
+<td>零浪费</td>
+<td>不复用 chunk</td>
+</tr>
+<tr>
+<td><strong>pfree 行为</strong></td>
+<td>小 chunk 入空闲链表，大 chunk 调 free()</td>
+<td>归还 slab</td>
+<td>可能归还 OS</td>
+</tr>
+<tr>
+<td><strong>内存归还 OS</strong></td>
+<td>仅在 Reset/Delete 时</td>
+<td>pfree 即可归还</td>
+<td>pfree 即可归还</td>
+</tr>
+<tr>
+<td><strong>典型用途</strong></td>
+<td>大多数上下文</td>
+<td>ReorderBuffer</td>
+<td>ReorderBuffer</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+
+<hr>
+<h2>三、上下文树层次与生命周期</h2>
+<h3>3.1 标准上下文层次</h3>
+<p>PostgreSQL 在运行时维护一棵内存上下文树。<code class="notranslate">TopMemoryContext</code> 是根节点，所有其他上下文都是其直接或间接子节点。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/e3b4cad2-00ae-47bd-b17c-abd3695b5d32"><img width="1200" height="588" alt="Image" src="https://github.com/user-attachments/assets/e3b4cad2-00ae-47bd-b17c-abd3695b5d32" style="max-width: 100%; height: auto; max-height: 588px;; aspect-ratio: 1200 / 588; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>上下文</th>
+<th>生命周期</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">TopMemoryContext</code></td>
+<td>进程级别，永不释放</td>
+<td>全局永久数据</td>
+</tr>
+<tr>
+<td><code class="notranslate">ErrorContext</code></td>
+<td>进程级别，永不重置</td>
+<td>保证 OOM 时也有内存可用，允许在临界区分配</td>
+</tr>
+<tr>
+<td><code class="notranslate">CacheMemoryContext</code></td>
+<td>进程级别</td>
+<td>relcache/catcache 等系统缓存</td>
+</tr>
+<tr>
+<td><code class="notranslate">MessageContext</code></td>
+<td>每条客户端消息后 Reset</td>
+<td>查询文本、解析/计划树</td>
+</tr>
+<tr>
+<td><code class="notranslate">TopTransactionContext</code></td>
+<td>顶层事务结束后 Reset</td>
+<td>跨子事务的状态</td>
+</tr>
+<tr>
+<td><code class="notranslate">CurTransactionContext</code></td>
+<td>当前事务结束后 Reset</td>
+<td>事务内数据</td>
+</tr>
+<tr>
+<td><code class="notranslate">PortalContext</code></td>
+<td>Portal 销毁时释放</td>
+<td>Portal 执行期数据</td>
+</tr>
+<tr>
+<td><code class="notranslate">SubTransactionContext</code></td>
+<td>SAVEPOINT 级别</td>
+<td>子事务回滚时释放</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>源文件引用</strong>：</p>
+<ul>
+<li>上下文声明：<code class="notranslate">src/include/utils/memutils.h:55-64</code></li>
+<li>初始化逻辑：<code class="notranslate">src/backend/utils/mmgr/mcxt.c:98-135</code></li>
+</ul>
+<h3>3.2 树形结构操作</h3>
+<p><strong>添加子节点</strong>（<code class="notranslate">MemoryContextCreate</code>, <code class="notranslate">mcxt.c:814-853</code>）：头部插入</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:838-844 */</span>
+<span class="pl-s1">node</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span> <span class="pl-c1">=</span> <span class="pl-s1">parent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span>;
+<span class="pl-k">if</span> (<span class="pl-s1">parent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+    <span class="pl-s1">parent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span><span class="pl-c1">-&gt;</span><span class="pl-c1">prevchild</span> <span class="pl-c1">=</span> <span class="pl-s1">node</span>;
+<span class="pl-s1">parent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span> <span class="pl-c1">=</span> <span class="pl-s1">node</span>;</pre></div>
+<p><strong>摘除子节点</strong>（<code class="notranslate">MemoryContextSetParent</code>, <code class="notranslate">mcxt.c:361-404</code>）：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:375-384 */</span>
+<span class="pl-k">if</span> (<span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">prevchild</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">prevchild</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span> <span class="pl-c1">=</span> <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span>;
+<span class="pl-k">else</span>
+    <span class="pl-s1">parent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span> <span class="pl-c1">=</span> <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span>;
+<span class="pl-k">if</span> (<span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">nextchild</span><span class="pl-c1">-&gt;</span><span class="pl-c1">prevchild</span> <span class="pl-c1">=</span> <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">prevchild</span>;</pre></div>
+<h3>3.3 生命周期管理机制</h3>
+
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>操作</th>
+<th>行为</th>
+<th>源码位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">MemoryContextReset(ctx)</code></td>
+<td>删除所有子 context + 释放 ctx 本身内存</td>
+<td><code class="notranslate">mcxt.c:142-154</code></td>
+</tr>
+<tr>
+<td><code class="notranslate">MemoryContextDelete(ctx)</code></td>
+<td>从父节点摘除 + 递归删除子节点 + 释放</td>
+<td><code class="notranslate">mcxt.c:217-255</code></td>
+</tr>
+<tr>
+<td><code class="notranslate">MemoryContextDeleteChildren(ctx)</code></td>
+<td>仅删除子节点，保留自身</td>
+<td><code class="notranslate">mcxt.c:262-273</code></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<pre class="notranslate"><code class="notranslate">MemoryContextReset(context)         — 重置上下文（释放内存，保留上下文本身）
+  ├── MemoryContextDeleteChildren()  — 先删除所有子上下文
+  └── context-&gt;methods-&gt;reset()      — 调用具体分配器的 reset
+
+MemoryContextDelete(context)         — 删除上下文（释放内存 + 删除上下文）
+  ├── MemoryContextDeleteChildren()  — 删除所有子上下文
+  ├── MemoryContextSetParent(NULL)   — 从父上下文链表中摘除
+  └── context-&gt;methods-&gt;delete()     — 调用具体分配器的 delete
+</code></pre>
+<p><strong>为什么需要树形结构？</strong></p>
+<ol>
+<li>生命周期嵌套：事务 &gt; 语句 &gt; 扫描 &gt; 元组，树形结构正好对应这种层级</li>
+<li>防止泄漏：删除父节点时自动删除所有子节点，不会遗漏</li>
+<li>错误安全：发生 ERROR 时，只需 reset 对应的生命周期上下文，就能清理所有相关内存</li>
+</ol>
+<p><strong>典型调用链</strong>：<code class="notranslate">exec_simple_query → PortalDrop → MemoryContextReset(MessageContext)</code></p>
+<hr>
+<h2>四、AllocSet 内部实现详解</h2>
+<p>AllocSet 是 PostgreSQL 的默认分配器，绝大多数内存上下文使用此实现。</p>
+<p><code class="notranslate">MemoryContextData</code> 最重要的作用是管理各个内存上下文之间的关联关系，清除一个内存上下文时会遍历所有子节点并释放。</p>
+<p><code class="notranslate">AllocSetContext</code> 是 <code class="notranslate">MemoryContextData</code> 的具体实现，负责内存的分配和释放。</p>
+<p>一个 <code class="notranslate">AllocSetContext</code> 拥有多个 <code class="notranslate">AllocBlockData</code>（双向链表），每个 <code class="notranslate">AllocBlockData</code> 内部包含多个 <code class="notranslate">AllocChunkData</code>（连续排列），空闲的 <code class="notranslate">AllocChunkData</code> 通过 <code class="notranslate">freelist</code> 数组按大小分桶链式管理。</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>结构</th>
+<th>角色</th>
+<th>定义位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">AllocSetContext</code></td>
+<td>内存上下文管理器</td>
+<td><code class="notranslate">aset.c:121-135</code></td>
+</tr>
+<tr>
+<td><code class="notranslate">AllocBlockData</code></td>
+<td>从 malloc 获取的内存块</td>
+<td><code class="notranslate">aset.c:151-158</code></td>
+</tr>
+<tr>
+<td><code class="notranslate">AllocChunkData</code></td>
+<td>单次 palloc 分配的内存块前缀</td>
+<td><code class="notranslate">aset.c:172-194</code></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f4987ce3-0b41-4039-a5f8-5e4054a70860"><img width="1200" height="925" alt="Image" src="https://github.com/user-attachments/assets/f4987ce3-0b41-4039-a5f8-5e4054a70860" style="max-width: 100%; height: auto; max-height: 925px;; aspect-ratio: 1200 / 925; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<h3>4.1 AllocSetContext</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:121-135 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocSetContext</span>
+{
+    <span class="pl-smi">MemoryContextData</span> <span class="pl-c1">header</span>;   <span class="pl-c">/* 标准内存上下文头部 */</span>
+    <span class="pl-smi">AllocBlock</span>   <span class="pl-c1">blocks</span>;       <span class="pl-c">/* Block 双向链表头（始终指向活跃 Block） */</span>
+    <span class="pl-smi">AllocChunk</span>   <span class="pl-c1">freelist</span>[<span class="pl-c1">ALLOCSET_NUM_FREELISTS</span>]; <span class="pl-c">/* 11 个空闲 chunk 链表 */</span>
+    <span class="pl-smi">Size</span>         <span class="pl-c1">initBlockSize</span>; <span class="pl-c">/* 初始 Block 大小 */</span>
+    <span class="pl-smi">Size</span>         <span class="pl-c1">maxBlockSize</span>;  <span class="pl-c">/* 最大 Block 大小 */</span>
+    <span class="pl-smi">Size</span>         <span class="pl-c1">nextBlockSize</span>; <span class="pl-c">/* 下一个要分配的 Block 大小 */</span>
+    <span class="pl-smi">Size</span>         <span class="pl-c1">allocChunkLimit</span>; <span class="pl-c">/* chunk 尺寸上限 */</span>
+    <span class="pl-smi">AllocBlock</span>   <span class="pl-c1">keeper</span>;       <span class="pl-c">/* keeper Block (Reset 时不释放) */</span>
+    <span class="pl-smi">int</span>          <span class="pl-c1">freeListIndex</span>; <span class="pl-c">/* 全局上下文缓存池索引, -1 表示不缓存 */</span>
+} <span class="pl-smi">AllocSetContext</span>;</pre></div>
+<p><code class="notranslate">header</code> 是 <code class="notranslate">MemoryContextData</code> 类型，定义在 <code class="notranslate">src/include/nodes/memnodes.h:78-93</code>。AllocSetContext 必须以此字段开头，这是多态实现的基础——所有内存上下文类型都共享相同的头部布局。</p>
+<h3>4.2 AllocBlockData — malloc 内存块</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:151-158 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocBlockData</span>
+{
+    <span class="pl-smi">AllocSet</span>    <span class="pl-c1">aset</span>;       <span class="pl-c">/* 所属的 AllocSet */</span>
+    <span class="pl-smi">AllocBlock</span>  <span class="pl-c1">prev</span>;       <span class="pl-c">/* 双向链表：前一个 block */</span>
+    <span class="pl-smi">AllocBlock</span>  <span class="pl-c1">next</span>;       <span class="pl-c">/* 双向链表：后一个 block */</span>
+    <span class="pl-smi">char</span>       <span class="pl-c1">*</span><span class="pl-c1">freeptr</span>;    <span class="pl-c">/* Block 内空闲空间起始位置 */</span>
+    <span class="pl-smi">char</span>       <span class="pl-c1">*</span><span class="pl-c1">endptr</span>;     <span class="pl-c">/* Block 内空间结束位置 */</span>
+} <span class="pl-smi">AllocBlockData</span>;</pre></div>
+<p>Block 是从 <code class="notranslate">malloc()</code> 获取的连续内存。一个 Block 可以容纳多个 Chunk。<code class="notranslate">freeptr</code> 向 <code class="notranslate">endptr</code> 方向增长，新 Chunk 从 <code class="notranslate">freeptr</code> 处切割。</p>
+<p><strong>Block 内部布局</strong>：</p>
+<pre class="notranslate"><code class="notranslate">┌─────────────────┬──────────┬──────────┬──────────┬─────┬──────────────┐
+│ AllocBlockData  │ ChunkHdr │ Data     │ ChunkHdr │Data │  空闲空间    │
+│ (ALLOC_BLOCKHDRSZ)│(HDRSZ) │          │(HDRSZ)   │     │              │
+└─────────────────┴──────────┴──────────┴──────────┴─────┴──────────────┘
+                   ↑                                          ↑
+                 第一个 Chunk                              freeptr     endptr
+</code></pre>
+<p><strong>两种 Block 类型</strong>：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>类型</th>
+<th>特征</th>
+<th>分配时机</th>
+<th>释放时机</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>多 chunk Block</strong></td>
+<td><code class="notranslate">freeptr &lt; endptr</code>，包含多个 chunk</td>
+<td>正常分配，大小按倍增策略</td>
+<td><code class="notranslate">AllocSetReset</code> 时</td>
+</tr>
+<tr>
+<td><strong>单 chunk Block</strong></td>
+<td><code class="notranslate">freeptr == endptr</code>，仅一个 chunk</td>
+<td>请求超过 <code class="notranslate">allocChunkLimit</code></td>
+<td><code class="notranslate">pfree</code> 时立即 <code class="notranslate">free()</code></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<ul>
+<li>每个块通过 <code class="notranslate">malloc()</code> 分配</li>
+<li>块大小按<strong>倍增策略</strong>增长：<code class="notranslate">initBlockSize → 2x → 4x → ... → maxBlockSize</code>，达到最大块大小后，后续分配都按照最大块大小来分配</li>
+<li><strong>keeper 块</strong>（<code class="notranslate">keeper</code> 字段）：初始块，与 <code class="notranslate">AllocSetContext</code> 头部共享同一个 <code class="notranslate">malloc</code> 分配，<code class="notranslate">reset</code> 时保留不释放</li>
+<li>块内连续存放多个 chunk</li>
+<li>因为 <code class="notranslate">blocks</code> 使用的是链表头插法，所以始终指向当前 AllocSet 中 <code class="notranslate">AllocBlockData</code> 组成的<strong>双向链表头部</strong>，<strong>头部始终是当前活跃 Block</strong>，链表通过每个 Block 的 <code class="notranslate">prev</code> / <code class="notranslate">next</code> 指针连接</li>
+</ul>
+<h5>块尺寸增长参数</h5>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>字段</th>
+<th>含义</th>
+<th>默认值 (ALLOCSET_DEFAULT_SIZES)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">initBlockSize</code></td>
+<td>首个 Block 大小</td>
+<td>8KB</td>
+</tr>
+<tr>
+<td><code class="notranslate">maxBlockSize</code></td>
+<td>Block 尺寸上限</td>
+<td>8MB</td>
+</tr>
+<tr>
+<td><code class="notranslate">nextBlockSize</code></td>
+<td>下次分配的 Block 大小</td>
+<td>从 initBlockSize 开始倍增</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>增长策略（<code class="notranslate">aset.c:906-909</code>）：</p>
+<pre class="notranslate"><code class="notranslate">nextBlockSize = initBlockSize     → 8KB
+nextBlockSize &lt;&lt;= 1               → 16KB
+nextBlockSize &lt;&lt;= 1               → 32KB
+... 直到达到 maxBlockSize → 8MB (封顶)
+</code></pre>
+<h3>4.3 AllocChunkData — 分配块前缀</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:172-194 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocChunkData</span>
+{
+    <span class="pl-smi">Size</span>  <span class="pl-c1">size</span>;         <span class="pl-c">/* chunk 实际大小（对齐后） */</span>
+    <span class="pl-c">/* padding (alignment) */</span>
+    <span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-c1">aset</span>;         <span class="pl-c">/* 双重用途：已分配→指向 AllocSet；空闲→指向下一个空闲 chunk */</span>
+} <span class="pl-smi">AllocChunkData</span>;</pre></div>
+<p><code class="notranslate">aset</code> 字段的双重身份——侵入式链表：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>状态</th>
+<th><code class="notranslate">aset</code> 值</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>已分配</td>
+<td><code class="notranslate">(void *) set</code></td>
+<td><code class="notranslate">pfree</code> 时通过 <code class="notranslate">GetMemoryChunkContext</code> 找到所属上下文</td>
+</tr>
+<tr>
+<td>空闲（在 freelist 中）</td>
+<td><code class="notranslate">(void *) next_chunk</code></td>
+<td>充当侵入式链表的 next 指针，零额外开销</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>这种设计让 chunk 在"已分配"和"空闲"之间切换时无需额外存储：<code class="notranslate">pfree</code> 时只需 <code class="notranslate">chunk-&gt;aset = freelist[fidx]</code>，<code class="notranslate">palloc</code> 时只需 <code class="notranslate">chunk-&gt;aset = set</code>。</p>
+<p>关键宏（<code class="notranslate">aset.c:216-219</code>）：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">#define</span> <span class="pl-en">AllocPointerGetChunk</span>(<span class="pl-s1">ptr</span>)  ((AllocChunk)(((char *)(ptr)) - ALLOC_CHUNKHDRSZ))
+<span class="pl-k">#define</span> <span class="pl-en">AllocChunkGetPointer</span>(<span class="pl-s1">chk</span>)  ((AllocPointer)(((char *)(chk)) + ALLOC_CHUNKHDRSZ))</pre></div>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">#define</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>  sizeof(struct AllocChunkData)</pre></div>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">Static</span> <span class="pl-s1">AssertStmt</span>(<span class="pl-smi">ALLOC_CHUNKHDRSZ</span> <span class="pl-c1">==</span> <span class="pl-en">MAXALIGN</span>(<span class="pl-smi">ALLOC_CHUNKHDRSZ</span>),
+                 <span class="pl-s">"sizeof(AllocChunkData) is not maxaligned"</span>);
+<span class="pl-smi">Static</span> <span class="pl-s1">AssertStmt</span>(<span class="pl-smi">offsetof</span>(<span class="pl-smi">AllocChunkData</span>, <span class="pl-smi">aset</span>) <span class="pl-c1">+</span> <span class="pl-k">sizeof</span>(<span class="pl-s1">MemoryContext</span>) <span class="pl-c1">==</span>
+                 <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>,
+                 <span class="pl-s">"padding calculation in AllocChunkData is wrong"</span>);</pre></div>
+<p><code class="notranslate">AllocChunkData</code> 的大小被设计为 <code class="notranslate">MAXALIGN</code> 对齐的，确保 payload 起始地址也是对齐的。源码中有静态断言保证了 <code class="notranslate">aset</code> 字段紧邻 payload，<code class="notranslate">GetMemoryChunkContext()</code> 可以通过 <code class="notranslate">pointer - sizeof(void*)</code> 直接获取上下文指针。</p>
+<h3>4.4 核心参数定义</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:79-84 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOC_MINBITS</span>            3       <span class="pl-c">/* 最小 chunk 大小为 8 字节 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_NUM_FREELISTS</span>   11      <span class="pl-c">/* freelist 数组大小 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOC_CHUNK_LIMIT</span>  (1 &lt;&lt; (ALLOCSET_NUM_FREELISTS-1+ALLOC_MINBITS))
+                                        <span class="pl-c">/* 最大 chunk 限制 = 8192 字节 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOC_CHUNK_FRACTION</span>      4     <span class="pl-c">/* chunk 最大不超过 maxBlockSize 的 1/4 */</span></pre></div>
+<p><strong>块尺寸增长参数</strong>：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>字段</th>
+<th>含义</th>
+<th>默认值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">initBlockSize</code></td>
+<td>首个 Block 大小</td>
+<td>8KB</td>
+</tr>
+<tr>
+<td><code class="notranslate">maxBlockSize</code></td>
+<td>Block 尺寸上限</td>
+<td>8MB</td>
+</tr>
+<tr>
+<td><code class="notranslate">nextBlockSize</code></td>
+<td>下次分配的 Block 大小</td>
+<td>从 initBlockSize 开始倍增</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>增长策略：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:906-909 */</span>
+<span class="pl-s1">nextBlockSize</span> <span class="pl-c1">=</span> <span class="pl-s1">initBlockSize</span>     → <span class="pl-c1">8</span><span class="pl-c1">KB</span>
+<span class="pl-s1">nextBlockSize</span> &lt;&lt;= <span class="pl-c1">1</span>               → <span class="pl-c1">16</span><span class="pl-c1">KB</span>
+<span class="pl-s1">nextBlockSize</span> &lt;&lt;= <span class="pl-c1">1</span>               → <span class="pl-c1">32</span><span class="pl-c1">KB</span>
+... <span class="pl-smi">直到达到</span> <span class="pl-s1">maxBlockSize</span> → <span class="pl-c1">8</span><span class="pl-c1">MB</span> (<span class="pl-smi">封顶</span>)</pre></div>
+<h3>4.5 Freelist — 11 桶空闲链表</h3>
+<p>AllocSet 性能优化的核心。11 个桶位按 2 的幂次划分空闲 chunk：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="center">索引 (fidx)</th>
+<th align="center">Chunk 大小</th>
+<th align="center">计算公式</th>
+<th align="center">适用请求范围</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">0</td>
+<td align="center">8 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (0+3)</code></td>
+<td align="center">1 ~ 8 B</td>
+</tr>
+<tr>
+<td align="center">1</td>
+<td align="center">16 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (1+3)</code></td>
+<td align="center">9 ~ 16 B</td>
+</tr>
+<tr>
+<td align="center">2</td>
+<td align="center">32 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (2+3)</code></td>
+<td align="center">17 ~ 32 B</td>
+</tr>
+<tr>
+<td align="center">3</td>
+<td align="center">64 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (3+3)</code></td>
+<td align="center">33 ~ 64 B</td>
+</tr>
+<tr>
+<td align="center">4</td>
+<td align="center">128 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (4+3)</code></td>
+<td align="center">65 ~ 128 B</td>
+</tr>
+<tr>
+<td align="center">5</td>
+<td align="center">256 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (5+3)</code></td>
+<td align="center">129 ~ 256 B</td>
+</tr>
+<tr>
+<td align="center">6</td>
+<td align="center">512 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (6+3)</code></td>
+<td align="center">257 ~ 512 B</td>
+</tr>
+<tr>
+<td align="center">7</td>
+<td align="center">1024 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (7+3)</code></td>
+<td align="center">513 ~ 1024 B</td>
+</tr>
+<tr>
+<td align="center">8</td>
+<td align="center">2048 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (8+3)</code></td>
+<td align="center">1025 ~ 2048 B</td>
+</tr>
+<tr>
+<td align="center">9</td>
+<td align="center">4096 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (9+3)</code></td>
+<td align="center">2049 ~ 4096 B</td>
+</tr>
+<tr>
+<td align="center">10</td>
+<td align="center">8192 B</td>
+<td align="center"><code class="notranslate">1 &lt;&lt; (10+3)</code></td>
+<td align="center">4097 ~ 8192 B</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<ul>
+<li><code class="notranslate">pfree()</code> 时，chunk 按大小放入对应的 freelist</li>
+<li><code class="notranslate">palloc()</code> 时，先从 freelist 查找可复用的 chunk</li>
+<li>freelist 通过 <code class="notranslate">chunk-&gt;aset</code> 字段链接（一个字段两种用途）</li>
+</ul>
+<p><strong>分桶算法</strong>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:308-354 */</span>
+<span class="pl-k">static</span> <span class="pl-k">inline</span> <span class="pl-smi">int</span> <span class="pl-en">AllocSetFreeIndex</span>(<span class="pl-smi">Size</span> <span class="pl-s1">size</span>)
+{
+    <span class="pl-k">if</span> (<span class="pl-s1">size</span> <span class="pl-c1">&gt;</span> (<span class="pl-c1">1</span> &lt;&lt; <span class="pl-c1">ALLOC_MINBITS</span>))  <span class="pl-c">// &gt; 8</span>
+        <span class="pl-s1">idx</span> <span class="pl-c1">=</span> <span class="pl-c1">31</span> <span class="pl-c1">-</span> <span class="pl-en">__builtin_clz</span>((<span class="pl-smi">uint32</span>) <span class="pl-s1">size</span> <span class="pl-c1">-</span> <span class="pl-c1">1</span>) <span class="pl-c1">-</span> <span class="pl-c1">ALLOC_MINBITS</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+        <span class="pl-c">// 等价于 ceil(log2(size &gt;&gt; 3))</span>
+    <span class="pl-k">else</span>
+        <span class="pl-s1">idx</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+    <span class="pl-k">return</span> <span class="pl-s1">idx</span>;
+}</pre></div>
+<blockquote>
+<p><strong>超过 8192 B 的请求</strong>：不使用 freelist，直接通过 <code class="notranslate">malloc()</code> 分配独立 block。</p>
+</blockquote>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/bda0e936-0002-40f1-b91b-023d729b6065"><img width="1200" height="1054" alt="Image" src="https://github.com/user-attachments/assets/bda0e936-0002-40f1-b91b-023d729b6065" style="max-width: 100%; height: auto; max-height: 1054px;; aspect-ratio: 1200 / 1054; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><strong>LIFO 策略</strong>：释放时头插法推入链表头，分配时从链表头弹出。最近释放的 chunk 更可能仍在 CPU cache 中，提高缓存命中率。</p>
+<p><strong>性能设计</strong>：</p>
+<ul>
+<li><strong>幂次大小策略</strong>：保证可回收性——无论请求模式如何，浪费空间保持恒定（最坏约 50%）</li>
+<li><strong>大小分类阈值</strong>：<code class="notranslate">≤ 8KB</code> → freelist 复用；<code class="notranslate">&gt; 8KB</code> → malloc 独立 block</li>
+<li>所有 freelist 中的 chunk 都是 2 的幂次大小（<code class="notranslate">aset.c:57-60</code>），提高复用率</li>
+</ul>
+<h3>4.6 Keeper Block 机制</h3>
+<p>keeper 的目的：避免 Reset 时反复 malloc/free。</p>
+<p>初始创建时（<code class="notranslate">aset.c:487-500</code>），<code class="notranslate">AllocSetContext</code> 头部和第一个 <code class="notranslate">AllocBlockData</code> 共享<strong>同一块 malloc 内存</strong>：</p>
+<pre class="notranslate"><code class="notranslate">malloc(firstBlockSize) 返回的内存:
+┌──────────────────────┬───────────────┬─────────────────────────┐
+│  AllocSetContext     │ AllocBlockData│ 可用于分配 Chunk 的空间  │
+│  (上下文头部)          │ (keeper Block)│                         │
+└──────────────────────┴───────────────┴─────────────────────────┘
+</code></pre>
+<ul>
+<li><code class="notranslate">keeper</code> 指向这个初始 Block</li>
+<li><code class="notranslate">AllocSetReset</code> 时只重置 keeper 的 <code class="notranslate">freeptr</code>，其他 Block 被 <code class="notranslate">free()</code></li>
+<li>因此 Reset 后不需要重新 malloc 上下文头部和初始 Block</li>
+</ul>
+<p>内存布局：keeper 与 header 共享一次 malloc</p>
+<p><code class="notranslate">AllocSetContextCreateInternal</code>的核心代码：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:457-500 */</span>
+<span class="pl-c">/* 计算首次分配大小：context header + block header + chunk header */</span>
+<span class="pl-s1">firstBlockSize</span> <span class="pl-c1">=</span> <span class="pl-en">MAXALIGN</span>(<span class="pl-k">sizeof</span>(<span class="pl-s1">AllocSetContext</span>)) <span class="pl-c1">+</span>
+    <span class="pl-c1">ALLOC_BLOCKHDRSZ</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>;
+<span class="pl-k">if</span> (<span class="pl-s1">minContextSize</span> <span class="pl-c1">!=</span> <span class="pl-c1">0</span>)
+    <span class="pl-s1">firstBlockSize</span> <span class="pl-c1">=</span> <span class="pl-en">Max</span>(<span class="pl-s1">firstBlockSize</span>, <span class="pl-s1">minContextSize</span>);
+<span class="pl-k">else</span>
+    <span class="pl-s1">firstBlockSize</span> <span class="pl-c1">=</span> <span class="pl-en">Max</span>(<span class="pl-s1">firstBlockSize</span>, <span class="pl-s1">initBlockSize</span>);
+
+<span class="pl-c">/* 一次 malloc 分配整个区域 */</span>
+<span class="pl-s1">set</span> <span class="pl-c1">=</span> (<span class="pl-smi">AllocSet</span>) <span class="pl-en">malloc</span>(<span class="pl-s1">firstBlockSize</span>);
+
+<span class="pl-c">/* keeper block 紧跟在 context header 之后 */</span>
+<span class="pl-s1">block</span> <span class="pl-c1">=</span> (<span class="pl-s1">AllocBlock</span>) (((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span>) <span class="pl-c1">+</span> <span class="pl-en">MAXALIGN</span>(<span class="pl-k">sizeof</span>(<span class="pl-s1">AllocSetContext</span>)));
+<span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span> <span class="pl-c1">=</span> <span class="pl-s1">set</span>;
+<span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freeptr</span> <span class="pl-c1">=</span> ((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">block</span>) <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_BLOCKHDRSZ</span>;
+<span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">endptr</span> <span class="pl-c1">=</span> ((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span>) <span class="pl-c1">+</span> <span class="pl-s1">firstBlockSize</span>;
+
+<span class="pl-c">/* 标记为 keeper */</span>
+<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">keeper</span> <span class="pl-c1">=</span> <span class="pl-s1">block</span>;
+
+<span class="pl-c">/* 初始化 chunk freelist 为空 */</span>
+<span class="pl-en">MemSetAligned</span>(<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>, <span class="pl-c1">0</span>, <span class="pl-k">sizeof</span>(<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>));</pre></div>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/6137006f-a158-46bf-8106-c67508579828"><img width="1200" height="498" alt="Image" src="https://github.com/user-attachments/assets/6137006f-a158-46bf-8106-c67508579828" style="max-width: 100%; height: auto; max-height: 498px;; aspect-ratio: 1200 / 498; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><strong>关键点</strong>：</p>
+<ul>
+<li>上下文头 (<code class="notranslate">AllocSetContext</code>) 和 keeper block (<code class="notranslate">AllocBlockData</code>) 在同一次 <code class="notranslate">malloc</code> 中分配</li>
+<li><code class="notranslate">set-&gt;keeper</code> 指向紧跟在 header 后面的 block</li>
+<li>chunk freelist 初始化全部为 `NULL</li>
+</ul>
+<p><strong>keeper 的本质特征</strong></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>特性</th>
+<th>说明</th>
+<th>源码依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>共生死</strong></td>
+<td>与 context header 共用同一次 malloc，无法独立释放</td>
+<td><code class="notranslate">aset.c:469</code></td>
+</tr>
+<tr>
+<td><strong>Reset 不释放</strong></td>
+<td><code class="notranslate">AllocSetReset</code> 释放所有其他 block，但保留 keeper</td>
+<td><code class="notranslate">aset.c:585-598</code></td>
+</tr>
+<tr>
+<td><strong>Delete 时决定命运</strong></td>
+<td>可放入 context freelist 复用，或随 header 一起 free</td>
+<td><code class="notranslate">aset.c:627-705</code></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>为什么需要 keeper？</strong> 源码注释（<code class="notranslate">aset.c:551-557</code>）明确说明：</p>
+<blockquote>
+<p>In this way, we don't thrash malloc() when a context is repeatedly reset after small allocations, which is typical behavior for per-tuple contexts.</p>
+</blockquote>
+<p>典型场景是 per-tuple context：每个元组处理完毕后 Reset，下一个元组到来时重新分配。如果没有 keeper，每次 Reset 都要 <code class="notranslate">free()</code> + <code class="notranslate">malloc()</code>，造成严重的系统调用开销。</p>
+<h3>4.7 <code class="notranslate">allocChunkLimit</code> 的计算</h3>
+<p><code class="notranslate">allocChunkLimit</code> 决定了请求是作为 chunk 从 freelist/Block 中分配，还是单独 malloc 一个专用 Block。</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:529-532 */</span>
+<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">allocChunkLimit</span> <span class="pl-c1">=</span> <span class="pl-c1">ALLOC_CHUNK_LIMIT</span>;  <span class="pl-c">// 8KB</span>
+<span class="pl-k">while</span> ((<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">allocChunkLimit</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>) <span class="pl-c1">&gt;</span>
+       (<span class="pl-s1">maxBlockSize</span> <span class="pl-c1">-</span> <span class="pl-c1">ALLOC_BLOCKHDRSZ</span>) / <span class="pl-c1">ALLOC_CHUNK_FRACTION</span>)
+    <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">allocChunkLimit</span> &gt;&gt;= <span class="pl-c1">1</span>;</pre></div>
+<ul>
+<li>默认情况下等于 <code class="notranslate">ALLOC_CHUNK_LIMIT = 8KB</code></li>
+<li>若 <code class="notranslate">maxBlockSize</code> 较小（如 ALLOCSET_SMALL 的 8KB），则按比例降低，确保最大 chunk 不超过 Block 的 1/4</li>
+<li>随 maxBlockSize 变小，allocChunkLimit 也逐渐变小，以降低内存碎片</li>
+</ul>
+<h3>4.8 三者关系总览</h3>
+<pre class="notranslate"><code class="notranslate">AllocSetContext
+├── header.methods ──→ AllocSetMethods (虚函数表)
+├── blocks ──────────────────────────────────────┐
+├── freelist[0..10] → chunk → chunk → ... → NULL (每个桶的空闲链表)
+├── keeper ──────┐                               │
+│                │                               ↓
+│                └──→ [keeper Block] ⇄ [Block1] ⇄ [Block2] ⇄ ...
+│                         │ aset        │ aset        │ aset
+│                         ↓             ↓             ↓
+│                     指回 AllocSetContext (所有 Block 的 aset 都指向同一 set)
+│                         │
+│                         ↓ Block 内部连续排列:
+│                    ┌─────────┬──────────┬──────────┬─────────┐
+│                    │BlockHdr │Chunk1    │Chunk2    │ 空闲    │
+│                    │         │Hdr|Data  │Hdr|Data  │         │
+│                    └─────────┴──────────┴──────────┴─────────┘
+│                                        freeptr↑      endptr↑
+└── 初始 malloc 内存 ──────────────────────┘
+    (AllocSetContext + keeper Block 在同一 malloc 块中)
+</code></pre>
+
+<p>Block 是物理容器（malloc 单元），Chunk 是逻辑分配单元（用户可见），Freelist 是 Chunk 的回收站（按 2 的幂次分桶缓存）。</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>关系</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Block 包含 Chunk</td>
+<td>Block 是 malloc 返回的连续内存，内部分割为多个 Chunk</td>
+</tr>
+<tr>
+<td>Freelist 缓存 Chunk</td>
+<td>pfree 后 Chunk 通过侵入式链表挂在 freelist[fidx] 上</td>
+</tr>
+<tr>
+<td>Freelist 不直接关联 Block</td>
+<td>freelist 只管 chunk 的链式串联，不记录 chunk 来自哪个 block</td>
+</tr>
+<tr>
+<td>Block 残余空间 → Freelist</td>
+<td>Block 不够分配时，残余空间碎片化为 free chunk 进入 freelist</td>
+</tr>
+<tr>
+<td>大块 Chunk = 专用 Block</td>
+<td>size &gt; allocChunkLimit 时，一个 Block 只含一个 Chunk，pfree 时整块释放</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<hr>
+<h2>五、分配与释放流程</h2>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/c1bf906c-0ddf-44b0-a1fd-f981e5ad25d0"><img width="1200" height="992" alt="Image" src="https://github.com/user-attachments/assets/c1bf906c-0ddf-44b0-a1fd-f981e5ad25d0" style="max-width: 100%; height: auto; max-height: 992px;; aspect-ratio: 1200 / 992; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<h3>5.1 palloc 流程</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:1067-1096 */</span>
+<span class="pl-smi">void</span> <span class="pl-c1">*</span>
+<span class="pl-en">palloc</span>(<span class="pl-smi">Size</span> <span class="pl-s1">size</span>)
+{
+    <span class="pl-smi">void</span>       <span class="pl-c1">*</span><span class="pl-s1">ret</span>;
+    <span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-s1">CurrentMemoryContext</span>;  <span class="pl-c">/* 直接取全局变量 */</span>
+
+    <span class="pl-en">AssertArg</span>(<span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>));
+    <span class="pl-en">AssertNotInCriticalSection</span>(<span class="pl-s1">context</span>);
+
+    <span class="pl-k">if</span> (!<span class="pl-en">AllocSizeIsValid</span>(<span class="pl-s1">size</span>))
+        <span class="pl-en">elog</span>(<span class="pl-c1">ERROR</span>, <span class="pl-s">"invalid memory alloc request size %zu"</span>, <span class="pl-s1">size</span>);
+
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">isReset</span> <span class="pl-c1">=</span> false;                     <span class="pl-c">/* 标记上下文非空 */</span>
+
+    <span class="pl-s1">ret</span> <span class="pl-c1">=</span> <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">methods</span><span class="pl-c1">-&gt;</span><span class="pl-en">alloc</span>(<span class="pl-s1">context</span>, <span class="pl-s1">size</span>); <span class="pl-c">/* 委托给具体实现 */</span>
+    <span class="pl-c">/* ... 错误处理 ... */</span>
+    <span class="pl-k">return</span> <span class="pl-s1">ret</span>;
+}</pre></div>
+<p>等价关系：<code class="notranslate">palloc(size)</code> ≡ <code class="notranslate">MemoryContextAlloc(CurrentMemoryContext, size)</code></p>
+<p>调用链：</p>
+<pre class="notranslate"><code class="notranslate">palloc(size)
+  └─&gt; context-&gt;methods-&gt;alloc(context, size)   // 虚函数调用
+        └─&gt; AllocSetAlloc / SlabAlloc / GenerationAlloc  // 具体实现
+</code></pre>
+<h3>5.2 pfree 流程</h3>
+<p><code class="notranslate">pfree</code> 通过 chunk 头部的<strong>反向指针</strong>找到所属 context，再调用其 <code class="notranslate">free_p</code> 方法：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:1175-1181 */</span>
+<span class="pl-smi">void</span> <span class="pl-en">pfree</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>)
+{
+    <span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-en">GetMemoryChunkContext</span>(<span class="pl-s1">pointer</span>);
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">methods</span><span class="pl-c1">-&gt;</span><span class="pl-en">free_p</span>(<span class="pl-s1">context</span>, <span class="pl-s1">pointer</span>);
+}</pre></div>
+<p><code class="notranslate">AllocSetFree</code>（<code class="notranslate">aset.c:992-1060</code>）的处理逻辑：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Chunk 类型</th>
+<th>操作</th>
+<th>涉及的结构</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大块（&gt; allocChunkLimit）</td>
+<td><code class="notranslate">free(block)</code> 归还系统</td>
+<td>Block 链表（摘除节点）</td>
+</tr>
+<tr>
+<td>普通块</td>
+<td>头插法放入 <code class="notranslate">freelist[fidx]</code></td>
+<td>Freelist</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:1044-1058 */</span>
+<span class="pl-smi">int</span> <span class="pl-s1">fidx</span> <span class="pl-c1">=</span> <span class="pl-en">AllocSetFreeIndex</span>(<span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">size</span>);
+<span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span> <span class="pl-c1">=</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">fidx</span>];  <span class="pl-c">/* 利用 aset 作 next 指针 */</span>
+<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">fidx</span>] <span class="pl-c1">=</span> <span class="pl-s1">chunk</span>;                  <span class="pl-c">/* 头插法入链 */</span></pre></div>
+<p><strong>注意</strong>：普通 <code class="notranslate">pfree</code> <strong>不会</strong>修改 Block 的 <code class="notranslate">freeptr</code>。Chunk 原地保留在 Block 中，只是通过 <code class="notranslate">aset</code> 字段链入 Freelist。Block 本身不会缩小。</p>
+<p><code class="notranslate">GetMemoryChunkContext</code> 的实现：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/utils/memutils.h:112-135 */</span>
+<span class="pl-k">static</span> <span class="pl-k">inline</span> <span class="pl-smi">MemoryContext</span>
+<span class="pl-en">GetMemoryChunkContext</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span><span class="pl-s1">pointer</span>)
+{
+    <span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>;
+    <span class="pl-en">Assert</span>(<span class="pl-s1">pointer</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">pointer</span> <span class="pl-c1">==</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-en">MAXALIGN</span>(<span class="pl-s1">pointer</span>));
+
+    <span class="pl-c">/* 每个 chunk 前方 sizeof(void*) 字节存放所属 context 指针 */</span>
+    <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-c1">*</span>(<span class="pl-smi">MemoryContext</span> <span class="pl-c1">*</span>) (((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">pointer</span>) <span class="pl-c1">-</span> <span class="pl-k">sizeof</span>(<span class="pl-smi">void</span> <span class="pl-c1">*</span>));
+    <span class="pl-en">AssertArg</span>(<span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>));
+    <span class="pl-k">return</span> <span class="pl-s1">context</span>;
+}</pre></div>
+<p>调用链：</p>
+<pre class="notranslate"><code class="notranslate">pfree(pointer)
+  └─&gt; GetMemoryChunkContext(pointer)    // 从 chunk 头部取 context 指针
+        └─&gt; context-&gt;methods-&gt;free_p(context, pointer)  // 释放单个 chunk
+</code></pre>
+<h3>5.3 AllocSetAlloc 的三条路径</h3>
+<p><code class="notranslate">AllocSetAlloc</code>（<code class="notranslate">aset.c:720-986</code>）根据请求大小走不同的路径：</p>
+<p><strong>路径 1：大块分配（size &gt; allocChunkLimit，即 &gt; 8KB）</strong>（<code class="notranslate">aset.c:736-790</code>）</p>
+<pre class="notranslate"><code class="notranslate">size &gt; allocChunkLimit
+  → chunk_size = MAXALIGN(size)
+  → blksize = chunk_size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ
+  → block = malloc(blksize)           // 独立 Block
+  → block-&gt;freeptr = block-&gt;endptr    // 整个 Block 只有一个 Chunk
+  → chunk = block + ALLOC_BLOCKHDRSZ
+  → chunk-&gt;aset = set
+  → return chunk 的 payload
+</code></pre>
+<p>特点：一个 Block 只包含一个 Chunk，<code class="notranslate">freeptr == endptr</code>。<code class="notranslate">pfree</code> 时整个 Block 直接 <code class="notranslate">free()</code> 归还系统，<strong>不进入 Freelist</strong>。</p>
+<p><strong>路径 2：Freelist 复用（size ≤ allocChunkLimit 且 freelist[fidx] != NULL）</strong></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:798-827 */</span>
+<span class="pl-s1">fidx</span> <span class="pl-c1">=</span> <span class="pl-en">AllocSetFreeIndex</span>(<span class="pl-s1">size</span>);
+<span class="pl-s1">chunk</span> <span class="pl-c1">=</span> <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">fidx</span>];
+<span class="pl-k">if</span> (<span class="pl-s1">chunk</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+{
+    <span class="pl-en">Assert</span>(<span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">size</span> &gt;= <span class="pl-s1">size</span>);
+    <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">fidx</span>] <span class="pl-c1">=</span> (<span class="pl-smi">AllocChunk</span>) <span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span>;  <span class="pl-c">// 从链表头部摘除</span>
+    <span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span> <span class="pl-c1">=</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span>;                       <span class="pl-c">// 标记为已分配</span>
+    <span class="pl-k">return</span> <span class="pl-en">AllocChunkGetPointer</span>(<span class="pl-s1">chunk</span>);
+}</pre></div>
+<p>特点：完全不涉及 Block，也不调用 <code class="notranslate">malloc</code>。这是最高效的路径。</p>
+<p><strong>路径 3：Block 切割（size ≤ allocChunkLimit 且 freelist 为空）</strong>（<code class="notranslate">aset.c:839-985</code>）</p>
+<p>分三步：</p>
+<ol>
+<li><strong>检查当前 Block</strong>：<code class="notranslate">availspace = block-&gt;endptr - block-&gt;freeptr</code>，不够则将残余空间碎片化为 free chunks 放入 freelist</li>
+</ol>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:839-893 */</span>
+<span class="pl-s1">block</span> <span class="pl-c1">=</span> <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">blocks</span>                   <span class="pl-c">// 当前活跃 Block</span>
+<span class="pl-s1">availspace</span> <span class="pl-c1">=</span> <span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">endptr</span> <span class="pl-c1">-</span> <span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-en">freeptr</span>
+
+<span class="pl-s1">if</span> (<span class="pl-s1">availspace</span> <span class="pl-c1">&lt;</span> <span class="pl-s1">chunk_size</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>)
+  → <span class="pl-s1">将残余空间碎片化为</span> <span class="pl-s1">free</span> <span class="pl-s1">chunks</span> <span class="pl-s1">放入</span> <span class="pl-s1">freelist</span>  <span class="pl-c">// aset.c:857-888</span>
+  → <span class="pl-s1">标记需要新</span> <span class="pl-s1">Block</span></pre></div>
+<ol start="2">
+<li><strong>分配新 Block</strong>（如需要）：<code class="notranslate">blksize = nextBlockSize</code>（倍增策略），<code class="notranslate">malloc(blksize)</code>，插入链表头部</li>
+</ol>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:898-952 */</span>
+<span class="pl-s1">blksize</span> <span class="pl-c1">=</span> <span class="pl-s1">nextBlockSize</span>               <span class="pl-c">// 倍增策略: init → 2×init → 4×init ... → maxBlockSize</span>
+<span class="pl-s1">block</span> <span class="pl-c1">=</span> <span class="pl-en">malloc</span>(<span class="pl-s1">blksize</span>)
+<span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">blocks</span> <span class="pl-c1">=</span> <span class="pl-s1">block</span>                   <span class="pl-c">// 插入链表头部</span></pre></div>
+<ol start="3">
+<li><strong>切割 Chunk</strong>：在 Block 的 <code class="notranslate">freeptr</code> 处分配，<code class="notranslate">freeptr</code> 前移</li>
+</ol>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:957-966 */</span>
+<span class="pl-s1">chunk</span> <span class="pl-c1">=</span> (<span class="pl-smi">AllocChunk</span>) <span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freeptr</span>
+<span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freeptr</span> <span class="pl-c1">+=</span> (<span class="pl-s1">chunk_size</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>)
+<span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span> <span class="pl-c1">=</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span>
+<span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">size</span> <span class="pl-c1">=</span> <span class="pl-s1">chunk_size</span>
+<span class="pl-s1">return</span> <span class="pl-s1">chunk</span> <span class="pl-s1">的</span> <span class="pl-s1">payload</span></pre></div>
+<h3>5.4 碎片化回收：Block 残余空间 → Freelist</h3>
+<p>当前 Block 剩余空间不够分配新 Chunk 时 ，残余空间<strong>不会被浪费</strong>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:857-888 */</span>
+<span class="pl-k">while</span> (<span class="pl-s1">availspace</span> &gt;= ((<span class="pl-c1">1</span> &lt;&lt; <span class="pl-c1">ALLOC_MINBITS</span>) <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>))
+{
+    <span class="pl-smi">Size</span> <span class="pl-s1">availchunk</span> <span class="pl-c1">=</span> <span class="pl-s1">availspace</span> <span class="pl-c1">-</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>;
+    <span class="pl-smi">int</span>  <span class="pl-s1">a_fidx</span> <span class="pl-c1">=</span> <span class="pl-en">AllocSetFreeIndex</span>(<span class="pl-s1">availchunk</span>);
+
+    <span class="pl-c">/* 对齐到 2 的幂次 */</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">availchunk</span> <span class="pl-c1">!=</span> ((<span class="pl-smi">Size</span>) <span class="pl-c1">1</span> &lt;&lt; (<span class="pl-s1">a_fidx</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_MINBITS</span>)))
+    {
+        <span class="pl-s1">a_fidx</span><span class="pl-c1">--</span>;
+        <span class="pl-s1">availchunk</span> <span class="pl-c1">=</span> ((<span class="pl-smi">Size</span>) <span class="pl-c1">1</span> &lt;&lt; (<span class="pl-s1">a_fidx</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_MINBITS</span>));
+    }
+
+    <span class="pl-s1">chunk</span> <span class="pl-c1">=</span> (<span class="pl-s1">AllocChunk</span>) (<span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freeptr</span>);
+    <span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">size</span> <span class="pl-c1">=</span> <span class="pl-s1">availchunk</span>;
+    <span class="pl-s1">chunk</span><span class="pl-c1">-&gt;</span><span class="pl-c1">aset</span> <span class="pl-c1">=</span> (<span class="pl-smi">void</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">a_fidx</span>];  <span class="pl-c">// 链入 freelist</span>
+    <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freelist</span>[<span class="pl-s1">a_fidx</span>] <span class="pl-c1">=</span> <span class="pl-s1">chunk</span>;
+
+    <span class="pl-s1">block</span><span class="pl-c1">-&gt;</span><span class="pl-c1">freeptr</span> <span class="pl-c1">+=</span> (<span class="pl-s1">availchunk</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>);
+    <span class="pl-s1">availspace</span> <span class="pl-c1">-=</span> (<span class="pl-s1">availchunk</span> <span class="pl-c1">+</span> <span class="pl-c1">ALLOC_CHUNKHDRSZ</span>);
+}</pre></div>
+<p><strong>效果</strong>：Block 中无法容纳完整新 Chunk 的残余空间，被切割成多个小 free chunk，放入 Freelist 等待后续分配使用。</p>
+<p><strong>这个机制对 keeper 也适用</strong>：keeper block 作为 blocks 链表中的第一个 block，分配到空间不足时，残余空间同样会被碎片化到 chunk freelist 中。</p>
+<h3>5.5 MemoryContextReset 流程</h3>
+<p><strong>保留上下文结构，释放所有已分配 chunk 并删除所有子上下文</strong>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:142-154 */</span>
+<span class="pl-smi">void</span>
+<span class="pl-en">MemoryContextReset</span>(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>)
+{
+    <span class="pl-en">AssertArg</span>(<span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>));
+
+    <span class="pl-c">/* 1. 删除所有子上下文 */</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-en">MemoryContextDeleteChildren</span>(<span class="pl-s1">context</span>);
+
+    <span class="pl-c">/* 2. 释放本上下文内所有 chunk */</span>
+    <span class="pl-k">if</span> (!<span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">isReset</span>)
+        <span class="pl-en">MemoryContextResetOnly</span>(<span class="pl-s1">context</span>);
+}</pre></div>
+<p>调用链：</p>
+<pre class="notranslate"><code class="notranslate">MemoryContextReset(context)                     -- mcxt.c:142-154
+  ├─ MemoryContextDeleteChildren(context)       -- 递归删除所有子 context
+  │    └─ MemoryContextDelete(firstchild)
+  │         ├─ MemoryContextDeleteChildren(child)
+  │         ├─ MemoryContextCallResetCallbacks
+  │         ├─ MemoryContextSetParent(child, NULL) -- 从树中摘除
+  │         └─ methods-&gt;delete_context(child)
+  ├─ MemoryContextCallResetCallbacks(ctx)       -- 调用注册的清理回调
+  └─ methods-&gt;reset(ctx)                       -- 路由到 AllocSetReset
+       ├─ 清空所有 freelist
+       ├─ 遍历 block 链表, free() 所有非 keeper block
+       ├─ 重置 keeper block 的 freeptr
+       └─ nextBlockSize = initBlockSize (重置增长序列)
+</code></pre>
+<h3>5.6 MemoryContextDelete 流程</h3>
+<p><strong>删除上下文本身，包括从父上下文的子链中摘除</strong>：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:217-255 */</span>
+<span class="pl-smi">void</span>
+<span class="pl-en">MemoryContextDelete</span>(<span class="pl-smi">MemoryContext</span> <span class="pl-s1">context</span>)
+{
+    <span class="pl-en">AssertArg</span>(<span class="pl-en">MemoryContextIsValid</span>(<span class="pl-s1">context</span>));
+    <span class="pl-en">Assert</span>(<span class="pl-s1">context</span> <span class="pl-c1">!=</span> <span class="pl-s1">TopMemoryContext</span>);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">context</span> <span class="pl-c1">!=</span> <span class="pl-s1">CurrentMemoryContext</span>);
+
+    <span class="pl-c">/* 1. 先删除子上下文 */</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">firstchild</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-en">MemoryContextDeleteChildren</span>(<span class="pl-s1">context</span>);
+
+    <span class="pl-c">/* 2. 调用回调 */</span>
+    <span class="pl-en">MemoryContextCallResetCallbacks</span>(<span class="pl-s1">context</span>);
+
+    <span class="pl-c">/* 3. 从父上下文摘除（关键步骤，防止悬空指针） */</span>
+    <span class="pl-en">MemoryContextSetParent</span>(<span class="pl-s1">context</span>, <span class="pl-c1">NULL</span>);
+
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">ident</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;
+
+    <span class="pl-c">/* 4. 销毁上下文自身 */</span>
+    <span class="pl-s1">context</span><span class="pl-c1">-&gt;</span><span class="pl-c1">methods</span><span class="pl-c1">-&gt;</span><span class="pl-en">delete_context</span>(<span class="pl-s1">context</span>);
+}</pre></div>
+<p>调用链：</p>
+<pre class="notranslate"><code class="notranslate">MemoryContextDelete(context)                    -- mcxt.c:217-255
+  ├─ MemoryContextDeleteChildren(context)       -- 先删除子上下文
+  ├─ MemoryContextCallResetCallbacks(context)   -- 调用回调
+  ├─ MemoryContextSetParent(context, NULL)      -- 从父上下文摘除
+  └─ methods-&gt;delete_context(context)           -- 彻底销毁
+       └─ AllocSetDelete (可能放入 context freelist 缓存)
+</code></pre>
+<h3>5.7 Reset vs Delete 对比</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>特性</th>
+<th>MemoryContextReset</th>
+<th>MemoryContextDelete</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>上下文自身</td>
+<td><strong>保留</strong>，可继续使用</td>
+<td><strong>销毁</strong>，不可再用</td>
+</tr>
+<tr>
+<td>子上下文</td>
+<td>全部删除</td>
+<td>全部删除</td>
+</tr>
+<tr>
+<td>从父上下文摘除</td>
+<td>否</td>
+<td>是</td>
+</tr>
+<tr>
+<td>典型使用场景</td>
+<td>查询间重置 MessageContext</td>
+<td>销毁 PortalContext</td>
+</tr>
+<tr>
+<td>等价操作</td>
+<td>清空房间，保留房屋</td>
+<td>拆除整栋房屋</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>5.8 palloc/pfree 与 MemoryContextReset/MemoryContextDelete 的关系</h3>
+<p>在 PostgreSQL 内存管理系统中，<code class="notranslate">palloc</code>/<code class="notranslate">pfree</code> 和 <code class="notranslate">MemoryContextReset</code>/<code class="notranslate">MemoryContextDelete</code> 是<strong>两个不同层次</strong>的内存管理接口，它们协同工作而非相互替代：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>层次</th>
+<th>API</th>
+<th>操作对象</th>
+<th>类比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Chunk 级别</strong></td>
+<td><code class="notranslate">palloc</code> / <code class="notranslate">pfree</code> / <code class="notranslate">repalloc</code></td>
+<td>单个内存块</td>
+<td><code class="notranslate">malloc</code> / <code class="notranslate">free</code></td>
+</tr>
+<tr>
+<td><strong>Context 级别</strong></td>
+<td><code class="notranslate">MemoryContextReset</code> / <code class="notranslate">MemoryContextDelete</code></td>
+<td>整个上下文</td>
+<td>进程退出自动回收</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ec88dc2e-029f-412e-9056-f56865a160c8"><img width="1200" height="1036" alt="Image" src="https://github.com/user-attachments/assets/ec88dc2e-029f-412e-9056-f56865a160c8" style="max-width: 100%; height: auto; max-height: 1036px;; aspect-ratio: 1200 / 1036; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<h3>5.9 设计哲学：粗粒度回收为主</h3>
+<p>PostgreSQL 的内存管理核心思想：不需要逐个 pfree，依赖上下文的 Reset/Delete 统一回收。</p>
+<pre class="notranslate"><code class="notranslate">                   ┌──────────────────────────────┐
+                   │     MemoryContext (上下文)    │
+                   │                              │
+  palloc ──────&gt;   │   chunk1  chunk2  chunk3     │
+                   │   chunk4  chunk5  ...        │
+                   │                              │
+  Reset/Delete ─&gt;  │   所有 chunk 一次性释放         │
+                   └──────────────────────────────┘
+</code></pre>
+<p><strong>这意味着</strong>：</p>
+<ul>
+<li>大多数代码只调用 <code class="notranslate">palloc</code>，从不调用 <code class="notranslate">pfree</code></li>
+<li><code class="notranslate">pfree</code> 主要用于释放已知的大块内存（如大 tuple），以降低峰值内存占用</li>
+<li>当上下文被 Reset 或 Delete 时，所有通过 <code class="notranslate">palloc</code> 分配的内存都会被自动回收</li>
+<li>这种设计防止了内存泄漏</li>
+</ul>
+<h3>5.10 实际使用模式</h3>
+<p><strong>模式 1：查询执行（不需要 pfree）</strong></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 每条查询消息处理前 */</span>
+<span class="pl-en">MemoryContextReset</span>(<span class="pl-s1">MessageContext</span>);
+
+<span class="pl-c">/* 查询处理过程中大量 palloc */</span>
+<span class="pl-s1">ptr1</span> <span class="pl-c1">=</span> <span class="pl-en">palloc</span>(<span class="pl-s1">size1</span>);    <span class="pl-c">/* 在 MessageContext 中分配 */</span>
+<span class="pl-s1">ptr2</span> <span class="pl-c1">=</span> <span class="pl-en">palloc</span>(<span class="pl-s1">size2</span>);
+<span class="pl-c">/* ... 使用 ptr1, ptr2 ... */</span>
+<span class="pl-c">/* 不需要 pfree! */</span>
+
+<span class="pl-c">/* 下一条消息到来时, MessageContext 被 Reset, 所有分配自动回收 */</span>
+<span class="pl-en">MemoryContextReset</span>(<span class="pl-s1">MessageContext</span>);</pre></div>
+<p><strong>模式 2：大对象及时释放（需要 pfree）</strong></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 处理大 tuple 时及时释放 */</span>
+<span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-s1">ntuples</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
+{
+    <span class="pl-smi">char</span> <span class="pl-c1">*</span><span class="pl-s1">bigdata</span> <span class="pl-c1">=</span> <span class="pl-en">palloc</span>(<span class="pl-s1">large_size</span>);
+    <span class="pl-en">process_tuple</span>(<span class="pl-s1">bigdata</span>);
+    <span class="pl-en">pfree</span>(<span class="pl-s1">bigdata</span>);   <span class="pl-c">/* 及时释放, 避免峰值过高 */</span>
+}
+<span class="pl-c">/* 后续 MemoryContextReset 会回收剩余零碎分配 */</span></pre></div>
+<p><strong>模式 3：临时上下文</strong></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 创建临时上下文用于复杂计算 */</span>
+<span class="pl-smi">MemoryContext</span> <span class="pl-s1">tmpctx</span> <span class="pl-c1">=</span> <span class="pl-en">AllocSetContextCreate</span>(<span class="pl-s1">CurrentMemoryContext</span>,
+                                             <span class="pl-s">"temporary"</span>,
+                                             <span class="pl-c1">ALLOCSET_DEFAULT_SIZES</span>);
+<span class="pl-smi">MemoryContext</span> <span class="pl-s1">oldctx</span> <span class="pl-c1">=</span> <span class="pl-en">MemoryContextSwitchTo</span>(<span class="pl-s1">tmpctx</span>);
+
+<span class="pl-c">/* 所有分配都在 tmpctx 中 */</span>
+<span class="pl-smi">char</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">palloc</span>(<span class="pl-c1">1024</span>);
+<span class="pl-c">/* ... */</span>
+
+<span class="pl-c">/* 一次性销毁 */</span>
+<span class="pl-en">MemoryContextSwitchTo</span>(<span class="pl-s1">oldctx</span>);
+<span class="pl-en">MemoryContextDelete</span>(<span class="pl-s1">tmpctx</span>);  <span class="pl-c">/* tmpctx 及其所有分配全部消失 */</span></pre></div>
+<h3>5.11 调用链总结</h3>
+<pre class="notranslate"><code class="notranslate">palloc(size)
+└── MemoryContextAlloc(context, size)         // mcxt.c:862
+    └── AllocSetAlloc(context, size)          // aset.c:720
+        ├── size &gt; allocChunkLimit
+        │   └── malloc(blksize) → 返回独立 block 中的 chunk
+        ├── freelist[fidx] != NULL
+        │   └── 弹出 freelist 头部 chunk → 返回
+        └── freelist[fidx] == NULL
+            ├── 当前 block 空间足够 → 从 block 切分 chunk
+            └── 当前 block 空间不足 → malloc 新 block → 切分 chunk
+   
+pfree(pointer)
+└── AllocSetFree(context, pointer)            // aset.c:992
+    ├── chunk-&gt;size &gt; allocChunkLimit
+    │   └── 从 block 链表摘除 → free(block)
+    └── chunk-&gt;size &lt;= allocChunkLimit
+        └── 头插法放入 freelist[AllocSetFreeIndex(chunk-&gt;size)]
+
+MemoryContextReset(context)
+└── MemoryContextDeleteChildren(context)
+    └── MemoryContextResetOnly(context)
+        └── AllocSetReset(context)              // aset.c:558
+            ├── 清空所有 freelist
+            └── 遍历 blocks: keeper 保留, 其他 free()
+
+MemoryContextDelete(context)
+└── MemoryContextDeleteChildren(context)
+    └── MemoryContextSetParent(context, NULL)
+        └── AllocSetDelete(context)             // aset.c:627
+            ├── freeListIndex &gt;= 0 → Reset 后放入 context_freelists
+            └── freeListIndex == -1 → 直接 free()
+
+</code></pre>
+<hr>
+<h2>六、Context Freelist 缓存机制</h2>
+<h3>6.1 概述</h3>
+<p>AllocSet 维护全局静态数组 <code class="notranslate">context_freelists[2]</code>，缓存已删除的 AllocSetContext，下次创建同类型时直接复用，避免反复 <code class="notranslate">malloc/free</code> 开销。复用 <code class="notranslate">header.nextchild</code> 字段作为链表指针，不额外分配内存。</p>
+<h3>6.2 核心数据结构</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:246-261 */</span>
+
+<span class="pl-k">#define</span> <span class="pl-c1">MAX_FREE_CONTEXTS</span> 100
+
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocSetFreeList</span>
+{
+    <span class="pl-smi">int</span>         <span class="pl-c1">num_free</span>;       <span class="pl-c">/* 当前链表长度 */</span>
+    <span class="pl-smi">AllocSetContext</span> <span class="pl-c1">*</span><span class="pl-c1">first_free</span>; <span class="pl-c">/* LIFO 链表头指针 */</span>
+} <span class="pl-smi">AllocSetFreeList</span>;
+
+<span class="pl-c">/* context_freelists[0] is for default params, [1] for small params */</span>
+<span class="pl-k">static</span> <span class="pl-smi">AllocSetFreeList</span> <span class="pl-s1">context_freelists</span>[<span class="pl-c1">2</span>] <span class="pl-c1">=</span>
+{
+    { <span class="pl-c1">0</span>, <span class="pl-c1">NULL</span> },    <span class="pl-c">/* slot 0: ALLOCSET_DEFAULT_SIZES */</span>
+    { <span class="pl-c1">0</span>, <span class="pl-c1">NULL</span> }     <span class="pl-c">/* slot 1: ALLOCSET_SMALL_SIZES   */</span>
+};</pre></div>
+<ul>
+<li><strong><code class="notranslate">context_freelists[0]</code></strong>：缓存 <code class="notranslate">ALLOCSET_DEFAULT_SIZES</code> 参数的 context（<code class="notranslate">initBlockSize = 8KB</code>）</li>
+<li><strong><code class="notranslate">context_freelists[1]</code></strong>：缓存 <code class="notranslate">ALLOCSET_SMALL_SIZES</code> 参数的 context（<code class="notranslate">initBlockSize = 1KB</code>）</li>
+<li><strong>最大容量</strong>：每个 slot 最多缓存 <code class="notranslate">MAX_FREE_CONTEXTS = 100</code> 个 context</li>
+</ul>
+<p><strong>链表节点：AllocSetContext</strong></p>
+<p>freelist 中的 context 通过 <code class="notranslate">header.nextchild</code> 字段链接成单链表：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/nodes/memnodes.h:78-93 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">MemoryContextData</span>
+{
+    <span class="pl-smi">NodeTag</span>     <span class="pl-c1">type</span>;               <span class="pl-c">/* 标识节点类型 */</span>
+    <span class="pl-smi">bool</span>        <span class="pl-c1">isReset</span>;            <span class="pl-c">/* T = no space alloced since last reset */</span>
+    <span class="pl-smi">bool</span>        <span class="pl-c1">allowInCritSection</span>; <span class="pl-c">/* allow palloc in critical section */</span>
+    <span class="pl-smi">Size</span>        <span class="pl-c1">mem_allocated</span>;      <span class="pl-c">/* track memory allocated for this context */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">MemoryContextMethods</span> <span class="pl-c1">*</span><span class="pl-c1">methods</span>;  <span class="pl-c">/* 虚函数表 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">parent</span>;           <span class="pl-c">/* 父上下文 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">firstchild</span>;       <span class="pl-c">/* 第一个子上下文 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">prevchild</span>;        <span class="pl-c">/* 前一个兄弟 */</span>
+    <span class="pl-smi">MemoryContext</span> <span class="pl-c1">nextchild</span>;        <span class="pl-c">/* 后一个兄弟 */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">char</span> <span class="pl-c1">*</span><span class="pl-c1">name</span>;               <span class="pl-c">/* 上下文名称（调试用） */</span>
+    <span class="pl-k">const</span> <span class="pl-smi">char</span> <span class="pl-c1">*</span><span class="pl-c1">ident</span>;              <span class="pl-c">/* 上下文 ID（调试用） */</span>
+    <span class="pl-smi">MemoryContextCallback</span> <span class="pl-c1">*</span><span class="pl-c1">reset_cbs</span>; <span class="pl-c">/* reset/delete 回调 */</span>
+} <span class="pl-smi">MemoryContextData</span>;
+
+<span class="pl-c">/* src/backend/utils/mmgr/aset.c:121-135 */</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">AllocSetContext</span>
+{
+    <span class="pl-smi">MemoryContextData</span> <span class="pl-c1">header</span>;   <span class="pl-c">/* 包含 nextchild 字段 */</span>
+    <span class="pl-smi">AllocBlock</span>  <span class="pl-c1">blocks</span>;
+    <span class="pl-smi">AllocChunk</span>  <span class="pl-c1">freelist</span>[<span class="pl-c1">ALLOCSET_NUM_FREELISTS</span>];
+    <span class="pl-smi">Size</span>        <span class="pl-c1">initBlockSize</span>;
+    <span class="pl-smi">Size</span>        <span class="pl-c1">maxBlockSize</span>;
+    <span class="pl-smi">Size</span>        <span class="pl-c1">nextBlockSize</span>;
+    <span class="pl-smi">Size</span>        <span class="pl-c1">allocChunkLimit</span>;
+    <span class="pl-smi">AllocBlock</span>  <span class="pl-c1">keeper</span>;         <span class="pl-c">/* 保留块，reset 后不释放 */</span>
+    <span class="pl-smi">int</span>         <span class="pl-c1">freeListIndex</span>;  <span class="pl-c">/* 所属 freelist 索引，-1 表示不缓存 */</span>
+} <span class="pl-smi">AllocSetContext</span>;</pre></div>
+<p>context 进入 freelist 后，它已经从父 context 的子节点链表中摘除，<code class="notranslate">header.nextchild</code> 字段处于闲置状态。复用该字段作为 freelist 链接指针，不需要额外的内存。</p>
+<p>关键字段 <code class="notranslate">freeListIndex</code>：</p>
+<ul>
+<li><code class="notranslate">0</code> → 匹配 DEFAULT 参数，可放入 <code class="notranslate">context_freelists[0]</code></li>
+<li><code class="notranslate">1</code> → 匹配 SMALL 参数，可放入 <code class="notranslate">context_freelists[1]</code></li>
+<li><code class="notranslate">-1</code> → 自定义参数，不参与 freelist 缓存</li>
+</ul>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f8140846-f5d4-4e5b-bc18-326b493d7ed1"><img width="1200" height="845" alt="Image" src="https://github.com/user-attachments/assets/f8140846-f5d4-4e5b-bc18-326b493d7ed1" style="max-width: 100%; height: auto; max-height: 845px;; aspect-ratio: 1200 / 845; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<h3>6.3 匹配规则</h3>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/aset.c:417-424 */</span>
+
+<span class="pl-k">if</span> (<span class="pl-s1">minContextSize</span> <span class="pl-c1">==</span> <span class="pl-c1">ALLOCSET_DEFAULT_MINSIZE</span> <span class="pl-c1">&amp;&amp;</span>
+    <span class="pl-s1">initBlockSize</span> <span class="pl-c1">==</span> <span class="pl-c1">ALLOCSET_DEFAULT_INITSIZE</span>)
+    <span class="pl-s1">freeListIndex</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+<span class="pl-k">else</span> <span class="pl-k">if</span> (<span class="pl-s1">minContextSize</span> <span class="pl-c1">==</span> <span class="pl-c1">ALLOCSET_SMALL_MINSIZE</span> <span class="pl-c1">&amp;&amp;</span>
+         <span class="pl-s1">initBlockSize</span> <span class="pl-c1">==</span> <span class="pl-c1">ALLOCSET_SMALL_INITSIZE</span>)
+    <span class="pl-s1">freeListIndex</span> <span class="pl-c1">=</span> <span class="pl-c1">1</span>;
+<span class="pl-k">else</span>
+    <span class="pl-s1">freeListIndex</span> <span class="pl-c1">=</span> <span class="pl-c1">-1</span>;</pre></div>
+<p>匹配规则的设计考量：</p>
+<ul>
+<li><strong>不比较 <code class="notranslate">maxBlockSize</code></strong>：maxBlockSize 不影响初始 keeper block 的大小，缓存后可以安全更新</li>
+<li><strong>只匹配两种预设参数组合</strong>：自定义参数的 context（<code class="notranslate">freeListIndex = -1</code>）直接 <code class="notranslate">free()</code>，不缓存</li>
+</ul>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>预设宏</th>
+<th>minContextSize</th>
+<th>initBlockSize</th>
+<th>maxBlockSize</th>
+<th>freeListIndex</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">ALLOCSET_DEFAULT_SIZES</code></td>
+<td>0</td>
+<td>8KB</td>
+<td>8MB</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code class="notranslate">ALLOCSET_SMALL_SIZES</code></td>
+<td>0</td>
+<td>1KB</td>
+<td>8KB</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code class="notranslate">ALLOCSET_START_SMALL_SIZES</code></td>
+<td>0</td>
+<td>1KB</td>
+<td>8MB</td>
+<td>1 (与 SMALL 共用)</td>
+</tr>
+<tr>
+<td>自定义值</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>-1 (不缓存)</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>宏定义</strong></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/include/utils/memutils.h:192-213 */</span>
+
+<span class="pl-c">/* Default freelist 对应的参数 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_DEFAULT_MINSIZE</span>   0
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_DEFAULT_INITSIZE</span>  (8 * 1024)
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_DEFAULT_MAXSIZE</span>   (8 * 1024 * 1024)  // 8MB
+
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_DEFAULT_SIZES</span> \
+    ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE
+
+<span class="pl-c">/* Small freelist 对应的参数 */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_SMALL_MINSIZE</span>     0
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_SMALL_INITSIZE</span>    (1 * 1024)
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_SMALL_MAXSIZE</span>     (8 * 1024)          // 8KB
+
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_SMALL_SIZES</span> \
+    ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE
+
+<span class="pl-c">/* 特殊情况：起步小但能长到 8MB */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">ALLOCSET_START_SMALL_SIZES</span> \
+    ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE</pre></div>
+<h3>6.4 创建路径：从 Freelist 复用</h3>
+<p><strong>源函数</strong>：<code class="notranslate">AllocSetContextCreateInternal()</code>（<code class="notranslate">aset.c:378-544</code>）</p>
+<pre class="notranslate"><code class="notranslate">AllocSetContextCreateInternal(parent, name, minContextSize, initBlockSize, maxBlockSize)
+│
+├── 1. 计算匹配的 freeListIndex (0, 1, 或 -1)
+│
+├── 2. if (freeListIndex &gt;= 0 &amp;&amp; freelist-&gt;first_free != NULL)
+│   │
+│   ├── 从 freelist 链表头取下 context (LIFO)
+│   ├── 更新 maxBlockSize（唯一可能变化的参数）
+│   ├── 调用 MemoryContextCreate() 重新初始化 header
+│   ├── 设置 mem_allocated = keeper block 大小
+│   └── return (MemoryContext) set;  // 直接返回，无需 malloc
+│
+└── 3. else (无可用缓存 或 不匹配)
+    │
+    ├── 计算首个 block 大小 firstBlockSize
+    ├── malloc(firstBlockSize)  // 一次性分配 context + keeper block
+    ├── 初始化 block header
+    ├── 设置 keeper block
+    ├── 初始化 freelist[0..10] = NULL
+    ├── 计算 allocChunkLimit
+    ├── MemoryContextCreate()
+    └── return (MemoryContext) set;
+</code></pre>
+<p><strong>复用时的关键观察</strong>：</p>
+<ul>
+<li>复用时 keeper block <strong>已经完好</strong>，无需重新 malloc</li>
+<li><code class="notranslate">mem_allocated</code> 直接从 keeper 的 <code class="notranslate">endptr</code> 计算</li>
+<li>chunk freelist 此时为空（Reset 时已清零）</li>
+</ul>
+<h4>复用时的关键操作</h4>
+<p><strong>源文件</strong>：<code class="notranslate">aset.c:429-455</code></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-s1">freeListIndex</span> &gt;= <span class="pl-c1">0</span>)
+{
+    <span class="pl-smi">AllocSetFreeList</span> <span class="pl-c1">*</span><span class="pl-s1">freelist</span> <span class="pl-c1">=</span> <span class="pl-c1">&amp;</span><span class="pl-s1">context_freelists</span>[<span class="pl-s1">freeListIndex</span>];
+
+    <span class="pl-k">if</span> (<span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+    {
+        <span class="pl-c">/* 从链表头移除 (LIFO) */</span>
+        <span class="pl-s1">set</span> <span class="pl-c1">=</span> <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span>;
+        <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span> <span class="pl-c1">=</span> (<span class="pl-smi">AllocSet</span>) <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">header</span>.<span class="pl-c1">nextchild</span>;
+        <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">num_free</span><span class="pl-c1">--</span>;
+
+        <span class="pl-c">/* 更新 maxBlockSize（其他参数不变） */</span>
+        <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">maxBlockSize</span> <span class="pl-c1">=</span> <span class="pl-s1">maxBlockSize</span>;
+
+        <span class="pl-c">/* 重新初始化 header（安装正确的 name 和 parent） */</span>
+        <span class="pl-en">MemoryContextCreate</span>((<span class="pl-smi">MemoryContext</span>) <span class="pl-s1">set</span>,
+                            <span class="pl-s1">T_AllocSetContext</span>,
+                            <span class="pl-c1">&amp;</span><span class="pl-s1">AllocSetMethods</span>,
+                            <span class="pl-s1">parent</span>, <span class="pl-s1">name</span>);
+
+        ((<span class="pl-smi">MemoryContext</span>) <span class="pl-s1">set</span>)<span class="pl-c1">-&gt;</span><span class="pl-c1">mem_allocated</span> <span class="pl-c1">=</span>
+            <span class="pl-s1">set</span><span class="pl-c1">-&gt;</span><span class="pl-c1">keeper</span><span class="pl-c1">-&gt;</span><span class="pl-c1">endptr</span> <span class="pl-c1">-</span> ((<span class="pl-smi">char</span> <span class="pl-c1">*</span>) <span class="pl-s1">set</span>);
+
+        <span class="pl-k">return</span> (<span class="pl-smi">MemoryContext</span>) <span class="pl-s1">set</span>;
+    }
+}</pre></div>
+<p>复用时的要点：</p>
+<ul>
+<li>LIFO 顺序：最后放入的 context 最先被取出，缓存局部性好</li>
+<li>只更新 <code class="notranslate">maxBlockSize</code>：其他参数（<code class="notranslate">initBlockSize</code>、<code class="notranslate">freeListIndex</code>、keeper block）在 reset 后不变</li>
+<li>不需要 <code class="notranslate">malloc()</code>：直接复用已有内存</li>
+</ul>
+<h3>6.5 删除路径：放入 Freelist 缓存</h3>
+<p><strong>源函数</strong>：<code class="notranslate">AllocSetDelete()</code>（<code class="notranslate">aset.c:626-705</code>）</p>
+<pre class="notranslate"><code class="notranslate">AllocSetDelete(context)
+│
+├── 1. if (freeListIndex &gt;= 0)  ← 是缓存候选？
+│   │
+│   ├── 2. if (!context-&gt;isReset)
+│   │   └── MemoryContextResetOnly(context)  // 清理所有非 keeper block
+│   │
+│   ├── 3. if (freelist-&gt;num_free &gt;= MAX_FREE_CONTEXTS)
+│   │   │
+│   │   └── 溢出处理：一次性清空整个 freelist，free() 所有旧 context
+│   │       ├── while (freelist-&gt;first_free != NULL)
+│   │       │   ├── 取出 oldset
+│   │       │   └── free(oldset)  // 直接释放到 OS
+│   │       └── num_free = 0
+│   │
+│   ├── 4. set-&gt;header.nextchild = freelist-&gt;first_free
+│   │   freelist-&gt;first_free = set
+│   │   num_free++
+│   │
+│   └── return;  // 不执行后续的 free()
+│
+└── 5. else (freeListIndex == -1)
+    ├── 释放所有非 keeper block
+    └── free(set)  // 直接释放整个 context
+</code></pre>
+<p><strong>溢出策略详解</strong></p>
+<p><strong>源文件</strong>：<code class="notranslate">aset.c:660-673</code></p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">num_free</span> &gt;= <span class="pl-c1">MAX_FREE_CONTEXTS</span>)
+{
+    <span class="pl-k">while</span> (<span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+    {
+        <span class="pl-smi">AllocSetContext</span> <span class="pl-c1">*</span><span class="pl-s1">oldset</span> <span class="pl-c1">=</span> <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span>;
+
+        <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">first_free</span> <span class="pl-c1">=</span> (<span class="pl-smi">AllocSetContext</span> <span class="pl-c1">*</span>) <span class="pl-s1">oldset</span><span class="pl-c1">-&gt;</span><span class="pl-c1">header</span>.<span class="pl-c1">nextchild</span>;
+        <span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">num_free</span><span class="pl-c1">--</span>;
+
+        <span class="pl-c">/* All that remains is to free the header/initial block */</span>
+        <span class="pl-en">free</span>(<span class="pl-s1">oldset</span>);
+    }
+    <span class="pl-en">Assert</span>(<span class="pl-s1">freelist</span><span class="pl-c1">-&gt;</span><span class="pl-c1">num_free</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>);
+}</pre></div>
+<p><strong>策略特点</strong>：</p>
+<ol>
+<li>不是逐个淘汰，而是一次性清空整个 freelist</li>
+<li>清空后，只保留当前被删除的 context 作为新的唯一节点</li>
+<li>设计假设（源码注释 <code class="notranslate">aset.c:237-241</code>）：大量分配 context 的查询通常按相反顺序释放，LIFO 顺序使最近释放的 context 在下次优先复用</li>
+</ol>
+<h3>6.6 生命周期流程</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/4cbd6504-88aa-4f3d-a714-e8e9a93943f0"><img width="1200" height="977" alt="Image" src="https://github.com/user-attachments/assets/4cbd6504-88aa-4f3d-a714-e8e9a93943f0" style="max-width: 100%; height: auto; max-height: 977px;; aspect-ratio: 1200 / 977; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>阶段</th>
+<th>chunk freelist</th>
+<th>keeper</th>
+<th>context freelist</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>创建</td>
+<td>空</td>
+<td>与 header 共享 malloc</td>
+<td>—</td>
+</tr>
+<tr>
+<td>使用中</td>
+<td>缓存 pfree 的 chunk</td>
+<td>参与分配</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Reset</td>
+<td>清零</td>
+<td>保留（重置 freeptr）</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>已在 Reset 中清零</td>
+<td>随 header 一起保留</td>
+<td>携带 keeper 整体缓存</td>
+</tr>
+<tr>
+<td>再次创建</td>
+<td>空</td>
+<td>直接复用</td>
+<td>取出复用</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>keeper 是 context-level freelist 能工作的前提。keeper 与 header 共享同一次 malloc，整个上下文在 Delete 后作为一个完整单元被缓存，下次 Create 时不需要系统级内存分配。</p>
+<h3>6.7 两类 Freelist 对比</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>维度</th>
+<th>Chunk-level freelist</th>
+<th>Context-level freelist</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>定义位置</strong></td>
+<td><code class="notranslate">set-&gt;freelist[11]</code></td>
+<td><code class="notranslate">context_freelists[2]</code></td>
+</tr>
+<tr>
+<td><strong>管理粒度</strong></td>
+<td>单个内存 chunk (8B~8KB)</td>
+<td>整个 AllocSet 上下文</td>
+</tr>
+<tr>
+<td><strong>触发时机</strong></td>
+<td><code class="notranslate">pfree</code> 放入，<code class="notranslate">palloc</code> 取用</td>
+<td><code class="notranslate">AllocSetDelete</code> 放入，<code class="notranslate">AllocSetContextCreate</code> 取用</td>
+</tr>
+<tr>
+<td><strong>最大数量</strong></td>
+<td>无限制（取决于 block 数）</td>
+<td>每个 slot 最多 100 个</td>
+</tr>
+<tr>
+<td><strong>链接方式</strong></td>
+<td><code class="notranslate">chunk-&gt;aset</code> 充当 next 指针</td>
+<td><code class="notranslate">header.nextchild</code> 充当 next 指针</td>
+</tr>
+<tr>
+<td><strong>设计目的</strong></td>
+<td>减少高频 palloc/pfree 的 malloc 开销</td>
+<td>减少低频 Create/Delete 的 malloc 开销</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>6.8 三层优化总结</h3>
+<p><strong>为什么需要 Context Freelist？</strong></p>
+<p>PostgreSQL 在查询处理中频繁创建和销毁内存上下文：</p>
+<ul>
+<li><strong>每条查询</strong>：创建 <code class="notranslate">MessageContext</code>、<code class="notranslate">PortalContext</code> 等</li>
+<li><strong>每个元组</strong>：可能创建临时上下文</li>
+<li><strong>每个子事务</strong>：创建 <code class="notranslate">TransactionContext</code> 子上下文</li>
+<li><strong>每次表达式计算</strong>：可能需要临时上下文</li>
+</ul>
+<p>每次 <code class="notranslate">malloc()</code> + <code class="notranslate">free()</code> 涉及系统调用和内存管理器开销，在高并发场景下累积显著。</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>层次</th>
+<th>机制</th>
+<th>优化目标</th>
+<th>避免的操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L1: 高频</strong></td>
+<td>chunk freelist</td>
+<td>palloc/pfree 循环</td>
+<td>避免每次分配调用 malloc</td>
+</tr>
+<tr>
+<td><strong>L2: 中频</strong></td>
+<td>keeper block</td>
+<td>Reset/重复使用</td>
+<td>避免 Reset 后重新 malloc 初始 block</td>
+</tr>
+<tr>
+<td><strong>L3: 低频</strong></td>
+<td>context freelist</td>
+<td>Create/Delete</td>
+<td>避免 Create 时 malloc header + 初始 block</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<hr>
+<h2>参考资料</h2>
+<ul>
+<li><code class="notranslate">src/backend/utils/mmgr/README</code> — Memory Context 系统设计概述</li>
+<li><code class="notranslate">src/backend/utils/mmgr/mcxt.c</code> — 抽象管理层实现</li>
+<li><code class="notranslate">src/backend/utils/mmgr/aset.c</code> — AllocSet 默认实现</li>
+<li><code class="notranslate">src/backend/utils/mmgr/slab.c</code> — Slab 分配器</li>
+<li><code class="notranslate">src/backend/utils/mmgr/generation.c</code> — Generation 分配器</li>
+<li><code class="notranslate">src/include/nodes/memnodes.h</code> — MemoryContextData 结构定义</li>
+<li><code class="notranslate">src/include/utils/memutils.h</code> — 公共 API 声明、参数宏、大小限制宏</li>
+<li><code class="notranslate">src/include/utils/palloc.h</code> — palloc 系列接口、MemoryContextCallback 定义</li>
+<li><code class="notranslate">src/backend/utils/sort/tuplesort.c</code> — tuplesort 的 work_mem 记账机制</li>
+<li><code class="notranslate">src/backend/executor/nodeHash.c</code> — Hash Join 内存限制计算</li>
+<li><code class="notranslate">src/backend/executor/execUtils.c:315-331</code> — CreateWorkExprContext</li>
+<li><code class="notranslate">src/backend/utils/misc/guc.c</code> — work_mem GUC 定义</li>
+<li><code class="notranslate">src/include/miscadmin.h</code> — work_mem 全局变量声明</li>
+<li><code class="notranslate">src/include/storage/buf_internals.h</code> —<code class="notranslate">BufferDesc</code> 结构体定义</li>
+<li><code class="notranslate">src/backend/storage/buffer/bufmgr.c</code> — <code class="notranslate">ReadBuffer()</code> 实现</li>
+<li><code class="notranslate">src/backend/storage/buffer/README</code>  — 共享缓冲区 Pin/Lock 规则</li>
+<li><code class="notranslate">src/backend/access/heap/heapam.c</code>   — 堆表访问（调用 <code class="notranslate">ReadBuffer</code>）</li>
+<li><code class="notranslate">src/backend/utils/sort/tuplesort.c</code> — 排序实现（<code class="notranslate">work_mem</code> 使用）</li>
+<li><code class="notranslate">src/backend/executor/nodeHash.c</code>    — Hash Join 实现（<code class="notranslate">work_mem</code> 使用）</li>
+<li><code class="notranslate">src/backend/utils/cache/relcache.c</code> — 表结构缓存（<code class="notranslate">CacheMemoryContext</code>）</li>
+<li><code class="notranslate">src/backend/utils/cache/catcache.c</code> — 系统目录缓存</li>
+<li><code class="notranslate">src/backend/tcop/postgres.c</code>  — 查询处理主循环（<code class="notranslate">MessageContext</code>）</li>
+<li><code class="notranslate">src/backend/utils/misc/guc.c</code>  — 配置参数定义（<code class="notranslate">work_mem</code> 等）</li>
+<li><code class="notranslate">src/include/miscadmin.h:260-262</code> — <code class="notranslate">work_mem</code> / <code class="notranslate">maintenance_work_mem</code> 声明</li>
+</ul>
+<p><strong>PostgreSQL 版本</strong>：14.4</p></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
