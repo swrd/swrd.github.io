@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
 <head>
+    <meta name="keywords" content="PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化">
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -316,7 +317,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <hr>
 <h2>4. 工作流程</h2>
 <h3>4.1 初始化流程</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/e3ffda3e-347d-48d8-9a09-5dbda8377851"><img width="1200" height="663" alt="Image" src="https://github.com/user-attachments/assets/e3ffda3e-347d-48d8-9a09-5dbda8377851" style="max-width: 100%; height: auto; max-height: 663px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/e3ffda3e-347d-48d8-9a09-5dbda8377851"><img width="1200" height="663" alt="Image" src="https://github.com/user-attachments/assets/e3ffda3e-347d-48d8-9a09-5dbda8377851" style="max-width: 100%; height: auto; max-height: 663px;; aspect-ratio: 1200 / 663; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h3>4.2 获取 Buffer 流程</h3>
 <p><strong>核心函数</strong>: <code class="notranslate">GetBufferFromRing()</code></p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件: src/backend/storage/buffer/freelist.c:610-660 */</span>
@@ -372,7 +373,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li><strong>动态填充</strong>: 初始时 Ring 是空的，由 <code class="notranslate">StrategyGetBuffer()</code> 在获取新 buffer 后填充</li>
 </ul>
 <p>GetBufferFromRing 中 ring buffer 获取的过程体现了 ring buffer 的环形实现，虽然是个数组，但是里面的 current 是循环推进的：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ecce4cad-3475-49b9-871e-46ca2bc928b8"><img width="1200" height="750" alt="Image" src="https://github.com/user-attachments/assets/ecce4cad-3475-49b9-871e-46ca2bc928b8" style="max-width: 100%; height: auto; max-height: 750px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ecce4cad-3475-49b9-871e-46ca2bc928b8"><img width="1200" height="750" alt="Image" src="https://github.com/user-attachments/assets/ecce4cad-3475-49b9-871e-46ca2bc928b8" style="max-width: 100%; height: auto; max-height: 750px;; aspect-ratio: 1200 / 750; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <p>环形槽位状态:</p>
 <markdown-accessiblity-table><table role="table">
 <thead>

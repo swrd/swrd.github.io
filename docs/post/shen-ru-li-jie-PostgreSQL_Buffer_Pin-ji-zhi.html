@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
 <head>
+    <meta name="keywords" content="PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化">
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -135,11 +136,11 @@ for a different page at any instant, so touching it is unsafe.
 <li>含义：最多支持 26 万多个进程同时 Pin 同一个 Buffer</li>
 </ul>
 <p>从 <code class="notranslate">src/include/storage/buf_internals.h</code> 可以看到，<code class="notranslate">BufferDesc</code> 中的 <code class="notranslate">state</code> 字段是一个 32 位原子变量，同时存储了 refcount 和 usage_count：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3"><img width="1098" height="691" alt="Image" src="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3" style="max-width: 100%; height: auto; max-height: 691px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3"><img width="1098" height="691" alt="Image" src="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3" style="max-width: 100%; height: auto; max-height: 691px;; aspect-ratio: 1098 / 691; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <hr>
 <h2>二、Pin、Lock、Usage Count：三剑客的分工</h2>
 <p>很多人容易混淆 Pin、Lock 和 Usage Count。让我用一张图说清楚：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2"><img width="1049" height="486" alt="Image" src="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2" style="max-width: 100%; height: auto; max-height: 486px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2"><img width="1049" height="486" alt="Image" src="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2" style="max-width: 100%; height: auto; max-height: 486px;; aspect-ratio: 1049 / 486; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h3>2.1 三者对比</h3>
 <markdown-accessiblity-table><table role="table">
 <thead>
@@ -195,7 +196,7 @@ for a different page at any instant, so touching it is unsafe.
 <li>你还在读写原来的数据？<strong>灾难</strong>！</li>
 </ol>
 <p>所以必须先 Pin（保证 Buffer 不被替换），再 Lock（保证内容不被并发修改）。</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811"><img width="1060" height="703" alt="Image" src="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811" style="max-width: 100%; height: auto; max-height: 703px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811"><img width="1060" height="703" alt="Image" src="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811" style="max-width: 100%; height: auto; max-height: 703px;; aspect-ratio: 1060 / 703; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h3>2.3 五条访问规则</h3>
 <p><code class="notranslate">README</code> 文档定义了 5 条 Buffer 访问规则：</p>
 <markdown-accessiblity-table><table role="table">
@@ -247,7 +248,7 @@ for a different page at any instant, so touching it is unsafe.
 <p>在高并发场景下，大量进程竞争同一个原子变量，性能会急剧下降。</p>
 <h3>3.2 解决方案：私有计数 + 共享计数</h3>
 <p>PostgreSQL 的解决方案非常精妙：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc"><img width="1060" height="800" alt="Image" src="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc" style="max-width: 100%; height: auto; max-height: 800px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc"><img width="1060" height="800" alt="Image" src="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc" style="max-width: 100%; height: auto; max-height: 800px;; aspect-ratio: 1060 / 800; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <p><strong>核心思想</strong>：</p>
 <ol>
 <li><strong>私有引用计数</strong>（PrivateRefCount）：每个进程在自己的本地内存中维护</li>
@@ -384,7 +385,7 @@ for a different page at any instant, so touching it is unsafe.
 </table></markdown-accessiblity-table>
 <h3>4.2 Pin机制的核心设计</h3>
 <p>PostgreSQL采用<strong>两层引用计数</strong>机制来实现Buffer Pin：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66"><img width="1014" height="787" alt="Image" src="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66" style="max-width: 100%; height: auto; max-height: 787px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66"><img width="1014" height="787" alt="Image" src="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66" style="max-width: 100%; height: auto; max-height: 787px;; aspect-ratio: 1014 / 787; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h4>设计优势</h4>
 <markdown-accessiblity-table><table role="table">
 <thead>
@@ -437,8 +438,8 @@ for a different page at any instant, so touching it is unsafe.
 <span class="pl-c">// 预留的空闲条目</span>
 <span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;</pre></div>
 <h3>4.4 Pin操作完整流程图</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746"><img width="942" height="901" alt="Image" src="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746" style="max-width: 100%; height: auto; max-height: 901px;"></a></p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849"><img width="947" height="216" alt="Image" src="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849" style="max-width: 100%; height: auto; max-height: 216px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746"><img width="942" height="901" alt="Image" src="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746" style="max-width: 100%; height: auto; max-height: 901px;; aspect-ratio: 942 / 901; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849"><img width="947" height="216" alt="Image" src="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849" style="max-width: 100%; height: auto; max-height: 216px;; aspect-ratio: 947 / 216; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h4>4.4.1 PinBuffer() 详解</h4>
 <p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1692-1771</code></p>
 <p>这是<strong>不持有spinlock</strong>时的pin操作，使用CAS原子操作实现无锁更新：</p>
@@ -631,8 +632,8 @@ for a different page at any instant, so touching it is unsafe.
 <h3>4.5 私有引用计数管理</h3>
 <h4>4.5.1 存储策略</h4>
 <p>采用<strong>数组+哈希表</strong>的混合存储，优化常见场景：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d"><img width="1015" height="818" alt="Image" src="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d" style="max-width: 100%; height: auto; max-height: 818px;"></a></p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6"><img width="1017" height="244" alt="Image" src="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6" style="max-width: 100%; height: auto; max-height: 244px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d"><img width="1015" height="818" alt="Image" src="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d" style="max-width: 100%; height: auto; max-height: 818px;; aspect-ratio: 1015 / 818; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6"><img width="1017" height="244" alt="Image" src="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6" style="max-width: 100%; height: auto; max-height: 244px;; aspect-ratio: 1017 / 244; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h4>4.5.2 核心函数</h4>
 <h5>ReservePrivateRefCountEntry() - <code class="notranslate">bufmgr.c:214-275</code></h5>
 <p>预留一个空闲的引用计数条目：</p>

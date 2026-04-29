@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
 <head>
+    <meta name="keywords" content="PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化">
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -171,7 +172,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </tbody>
 </table></markdown-accessiblity-table>
 <h3>2.2 位布局图</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41"><img width="1200" height="420" alt="Image" src="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41" style="max-width: 100%; height: auto; max-height: 420px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41"><img width="1200" height="420" alt="Image" src="https://github.com/user-attachments/assets/22756927-37c8-4079-be19-a51eaa27ff41" style="max-width: 100%; height: auto; max-height: 420px;; aspect-ratio: 1200 / 420; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h3>2.3 提取宏定义</h3>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* 源文件：src/include/storage/buf_internals.h:48-50 */</span>
 
@@ -211,7 +212,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li><strong>缓冲区选择</strong>：当 <code class="notranslate">usagecount == 0</code> 且 <code class="notranslate">refcount == 0</code> 时，该缓冲区被选为替换目标</li>
 </ol>
 <h3>3.2 算法流程图</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1"><img width="1200" height="1457" alt="Image" src="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1" style="max-width: 100%; height: auto; max-height: 1457px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1"><img width="1200" height="1457" alt="Image" src="https://github.com/user-attachments/assets/cc2cbc75-d6b0-4cd8-9039-97933f19f9a1" style="max-width: 100%; height: auto; max-height: 1457px;; aspect-ratio: 1200 / 1457; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <p>根据 <code class="notranslate">src/backend/storage/buffer/README:171-197</code>：</p>
 <blockquote>
 <p>Each buffer header contains a usage counter, which is incremented (up to a small limit value) whenever the buffer is pinned.</p>
@@ -313,7 +314,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 }</pre></div>
 <h2>4. UsageCount 生命周期</h2>
 <h3>4.1 生命周期图解</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2"><img width="1200" height="507" alt="Image" src="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2" style="max-width: 100%; height: auto; max-height: 507px;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2"><img width="1200" height="507" alt="Image" src="https://github.com/user-attachments/assets/f353cd8c-4f69-4293-b756-f1943dedfac2" style="max-width: 100%; height: auto; max-height: 507px;; aspect-ratio: 1200 / 507; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
 <h3>4.2 操作时机</h3>
 <markdown-accessiblity-table><table role="table">
 <thead>
