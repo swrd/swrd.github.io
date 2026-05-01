@@ -182,6 +182,14 @@ class GMEEK():
         if '<code class="notranslate">Gmeek-html' in post_body:
             post_body = re.sub(r'<code class="notranslate">Gmeek-html(.*?)</code>', lambda match: html.unescape(match.group(1)), post_body, flags=re.DOTALL)
 
+        if 'highlight-source-mermaid' in post_body:
+            def mermaid_replace(match):
+                code_text=re.sub(r'<[^>]+>','',match.group(1))
+                code_text=html.unescape(code_text)
+                return '<pre class="mermaid">\n'+code_text+'\n</pre>'
+            post_body=re.sub(r'<div class="highlight highlight-source-mermaid"><pre class="notranslate">(.*?)</pre>\s*</div>',mermaid_replace,post_body,flags=re.DOTALL)
+            issue["script"]=issue["script"]+'<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,theme:\'default\'});</script>'
+
         postBase["postTitle"]=issue["postTitle"]
         postBase["postUrl"]=self.blogBase["homeUrl"]+"/"+issue["postUrl"]
         postBase["description"]=issue["description"]
