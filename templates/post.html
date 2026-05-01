@@ -8,6 +8,9 @@
 <meta property="og:url" content="{{ blogBase['postUrl'] }}">
 <meta property="og:image" content="{{ blogBase['ogImage'] }}">
 <title>{{ blogBase['postTitle'] }}</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{ blogBase['postTitle'] }}","description":"{{ blogBase['description'] }}","datePublished":"{{ blogBase.get('createdDate','') }}","url":"{{ blogBase['postUrl'] }}","author":{"@type":"Person","name":"PGStone"}}
+</script>
 {% if blogBase['highlight']==1 %}<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />{% endif %}
 {{ blogBase['head'] }}
 {% endblock %}
@@ -166,12 +169,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('clipboard-copy').forEach(copyButton => {
         copyButton.addEventListener('click', () => {
             const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
-            const tempTextArea = document.createElement('textarea');
-            tempTextArea.value = codeContent;
-            document.body.appendChild(tempTextArea);
-            tempTextArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempTextArea);
+            navigator.clipboard.writeText(codeContent).catch(() => {
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = codeContent;
+                tempTextArea.style.position = 'fixed';
+                tempTextArea.style.opacity = '0';
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+            });
 
             const copyIcon = copyButton.querySelector('.octicon-copy');
             const checkIcon = copyButton.querySelector('.octicon-check');

@@ -455,12 +455,14 @@ class GMEEK():
         else:
             if self.blogBase["urlMode"]=="issue":
                 fileName=str(issue.number)
-            elif self.blogBase["urlMode"]=="ru_translit": 
+            elif self.blogBase["urlMode"]=="ru_translit":
                 fileName=str(translit(issue.title, language_code='ru', reversed=True)).replace(' ', '-')
             else:
                 fileName=Pinyin().get_pinyin(issue.title)
-        
-        fileName=re.sub(r'[<>:/\\|?*\"]|[\0-\31]', '-', fileName)
+
+        fileName=re.sub(r'[<>:/\\|?*\"\(\)\s]|[\0-\31]', '-', fileName)
+        fileName=re.sub(r'-{2,}', '-', fileName)
+        fileName=fileName.strip('-')
         return fileName
 
 ######################################################################################
