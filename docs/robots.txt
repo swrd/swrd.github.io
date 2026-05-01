@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://swrd.github.io/sitemap.xml
