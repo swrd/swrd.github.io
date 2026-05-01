@@ -311,6 +311,22 @@ class GMEEK():
         print("====== create rss xml ======")
         feed.rss_file(self.root_dir+'rss.xml')
 
+    def createSitemap(self):
+        lines=['<?xml version="1.0" encoding="UTF-8"?>',
+               '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        lines.append('<url><loc>{}</loc><changefreq>daily</changefreq><priority>1.0</priority></url>'.format(self.blogBase["homeUrl"]))
+        lines.append('<url><loc>{}/tag.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>'.format(self.blogBase["homeUrl"]))
+        for page in ["about","link"]:
+            if page in self.blogBase.get("singlePage",[]):
+                lines.append('<url><loc>{}.html</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>'.format(self.blogBase["homeUrl"]+"/"+page))
+        for post in self.blogBase["postListJson"].values():
+            lastmod=datetime.datetime.fromtimestamp(post["createdAt"],tz=self.TZ).strftime('%Y-%m-%d')
+            lines.append('<url><loc>{}{}</loc><lastmod>{}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>'.format(self.blogBase["homeUrl"],"/"+post["postUrl"] if not post["postUrl"].startswith("/") else post["postUrl"],lastmod))
+        lines.append('</urlset>')
+        with open(self.root_dir+'sitemap.xml','w',encoding='UTF-8') as f:
+            f.write('\n'.join(lines))
+        print("====== create sitemap xml ======")
+
     def addOnePostJson(self,issue):
         if len(issue.labels)>=1:
             if issue.labels[0].name in self.blogBase["singlePage"]:
@@ -417,6 +433,7 @@ class GMEEK():
 
         self.createPlistHtml()
         self.createFeedXml()
+        self.createSitemap()
         print("====== create static html end ======")
 
     def runOne(self,number_str):
@@ -427,6 +444,7 @@ class GMEEK():
             self.createPostHtml(self.blogBase[listJsonName]["P"+number_str])
             self.createPlistHtml()
             self.createFeedXml()
+            self.createSitemap()
             print("====== create static html end ======")
         else:
             print("====== issue is closed ======")
