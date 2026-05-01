@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html data-color-mode="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>搜索 - PGStone</title>
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    <script src="/assets/GmeekVercount.js"></script>
+    <script src="/assets/icons.js"></script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+    <link href="/pagefind/pagefind-ui.css" rel="stylesheet">
+    <style>
+    body{box-sizing:border-box;min-width:200px;max-width:900px;margin:20px auto;padding:45px;font-size:16px;font-family:sans-serif;line-height:1.25;}
+    #header{display:flex;padding-bottom:8px;border-bottom:1px solid var(--borderColor-muted,var(--color-border-muted));margin-bottom:16px;}
+    .title-left a{color:inherit;text-decoration:none;vertical-align:bottom;font-size:32px;font-weight:bold;font-family:Monaco;}
+    .title-right{display:flex;margin:auto 0 0 auto;}
+    .title-right .circle{padding:14px 16px;}
+    #search{margin-top:24px;}
+    .pagefind-ui__result-title a{color:var(--color-fg-default);text-decoration:none;font-size:18px;}
+    .pagefind-ui__result-title a:hover{text-decoration:underline;}
+    .pagefind-ui__result-excerpt{color:var(--color-fg-muted);font-size:14px;margin:4px 0;}
+    .pagefind-ui__result-tags{font-size:12px;}
+    .search-hint{color:var(--color-fg-muted);text-align:center;margin-top:60px;font-size:15px;}
+    @media(max-width:600px){body{padding:8px;}.title-left a{font-size:24px;}}
+    </style>
+</head>
+<body>
+    <div id="header">
+        <div class="title-left"><a href="https://swrd.github.io">PGStone</a></div>
+        <div class="title-right">
+            <a href="https://swrd.github.io" class="btn btn-invisible circle" title="首页">
+                <svg class="octicon" width="16" height="16"><path d="" id="pathHome" fill-rule="evenodd"></path></svg>
+            </a>
+            <a class="btn btn-invisible circle" onclick="modeSwitch()" title="切换主题">
+                <svg class="octicon" width="16" height="16"><path id="themeSwitch" fill-rule="evenodd"></path></svg>
+            </a>
+        </div>
+    </div>
+    <div id="search"></div>
+    <div class="search-hint" id="searchHint">输入关键词搜索全站文章...</div>
+    <div id="footer" style="margin-top:64px;text-align:center;font-size:small;">
+        <span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+    </div>
+</body>
+<script src="/pagefind/pagefind-ui.js"></script>
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+let theme=localStorage.getItem("meek_theme")||"light";
+let themeSettings={"dark":["dark","moon","#00f0ff"],"light":["light","sun","#ff5000"],"auto":["auto","sync",""]};
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode=currentMode==="light"?"dark":currentMode==="dark"?"auto":"light";
+    localStorage.setItem("meek_theme",newMode);
+    let s=themeSettings[newMode];
+    if(s){document.documentElement.setAttribute("data-color-mode",s[0]);document.getElementById("themeSwitch").setAttribute("d",IconList[s[1]]);document.getElementById("themeSwitch").parentNode.style.color=s[2];}
+}
+if(themeSettings[theme]){let s=themeSettings[theme];document.documentElement.setAttribute("data-color-mode",s[0]);document.getElementById("themeSwitch").setAttribute("d",IconList[s[1]];document.getElementById("themeSwitch").parentNode.style.color=s[2];}
+
+new PagefindUI({element:"#search",showSubResults:true});
+document.getElementById("search").addEventListener("input",function(){
+    document.getElementById("searchHint").style.display=this.querySelector("input").value?"none":"block";
+});
+</script>
+</html>

@@ -7,6 +7,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     {{ blogBase['primerCSS'] }}
     {{ blogBase['allHead'] }}
+    <script src="/assets/icons.js"></script>
     <link rel="icon" href="{{ blogBase['faviconUrl'] }}">
     {%- if blogBase['themeMode']=='manual' -%}
     <script>
@@ -30,7 +31,6 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="footer">{% include 'footer.html' %}</div>
 </body>
 <script>
-var IconList={{ IconList }};
 var utterancesLoad=0;
 {% if blogBase['themeMode']=='manual' %}
 let themeSettings={

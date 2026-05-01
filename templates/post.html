@@ -73,6 +73,16 @@
 {% block content %}
 <div class="markdown-body" id="postBody">{{ blogBase['postBody'] }}</div>
 <div style="font-size:small;margin-top:8px;float:right;">{{ blogBase['bottomText'] }}</div>
+{% if blogBase.get('relatedPosts') %}
+<div id="relatedPosts" style="clear:both;margin-top:48px;border-top:1px solid var(--color-border-default);padding-top:20px;">
+<h3 style="margin-bottom:12px;">相关文章</h3>
+<ul style="list-style:none;padding:0;">
+{% for rp in blogBase['relatedPosts'] %}
+<li style="margin-bottom:8px;"><a href="/{{ rp['postUrl'] }}">{{ rp['postTitle'] }}</a> <span style="color:var(--color-fg-muted);font-size:small;">{{ rp['createdDate'] }}</span></li>
+{% endfor %}
+</ul>
+</div>
+{% endif %}
 {% if blogBase['needComment']==1 %}
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">{{ i18n['comments'] }}</button>
 <div class="comments" id="comments"></div>

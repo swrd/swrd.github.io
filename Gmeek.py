@@ -150,6 +150,8 @@ class GMEEK():
         post_body=self.markdown2html(f.read())
         f.close()
 
+        post_body=re.sub(r'<img (?![^>]*loading=)', '<img loading="lazy" ', post_body)
+
         postBase=self.blogBase.copy()
 
         if '<math-renderer' in post_body:
@@ -207,7 +209,18 @@ class GMEEK():
             postBase["highlight"]=0
 
         postIcon=dict(zip(keys, map(IconBase.get, keys)))
-        self.renderHtml('post.html',postBase,{},issue["htmlDir"],postIcon)
+
+        currentLabels=set(issue["labels"])
+        related=[]
+        for p in self.blogBase["postListJson"].values():
+            if p["postTitle"]!=issue["postTitle"]:
+                overlap=len(currentLabels & set(p["labels"]))
+                if overlap>0:
+                    related.append((overlap,p))
+        related.sort(key=lambda x:(-x[0],-x[1].get("createdAt",0)))
+        postBase["relatedPosts"]=[{"postTitle":r[1]["postTitle"],"postUrl":r[1]["postUrl"],"createdDate":r[1].get("createdDate","")} for r in related[:5]]
+
+        self.renderHtml('post.html',postBase,self.blogBase["postListJson"],issue["htmlDir"],postIcon)
         print("create postPage title=%s file=%s " % (issue["postTitle"],issue["htmlDir"]))
 
     def createPlistHtml(self):
