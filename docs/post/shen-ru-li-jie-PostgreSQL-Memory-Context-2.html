@@ -121,7 +121,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 &gt; ~1GB 且 ≤ SIZE_MAX/2
   └→ 专用块 dedicated block (malloc)   MaxAllocHugeSize (AllocHuge 限制)
 </code></pre>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/8a88336c-a0e5-485b-b3c9-4523667dad0b"><img loading="lazy" width="1200" height="1141" alt="Image" src="https://github.com/user-attachments/assets/8a88336c-a0e5-485b-b3c9-4523667dad0b" style="max-width: 100%; height: auto; max-height: 1141px;; aspect-ratio: 1200 / 1141; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/8a88336c-a0e5-485b-b3c9-4523667dad0b"><img loading="lazy" width="1200" height="1141" alt="Image" src="https://github.com/user-attachments/assets/8a88336c-a0e5-485b-b3c9-4523667dad0b" style="max-width: 100%; height: auto; max-height: 1141px;; aspect-ratio: 1200 / 1141; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <h3>7.3 内存布局对比</h3>
 <p><strong>常规 Block</strong>：</p>
 <pre class="notranslate"><code class="notranslate">┌─────────────────────────────────────────────────────┐
@@ -554,7 +554,7 @@ freeptr == endptr（无剩余空间）
 }</pre></div>
 <p>如果 <code class="notranslate">work_mem = 4MB</code>，则 <code class="notranslate">maxBlockSize = 256KB</code>（8MB / 32 → 实际为 8MB &gt;&gt; 5 = 256KB）。AllocSet 单次 malloc 调用不超过 work_mem 的 1/16，避免一次大块分配就越过 work_mem 预算。</p>
 <h3>8.6 两者架构关系图</h3>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/447fdc94-33e2-4425-88db-db337d088005"><img loading="lazy" width="1200" height="845" alt="Image" src="https://github.com/user-attachments/assets/447fdc94-33e2-4425-88db-db337d088005" style="max-width: 100%; height: auto; max-height: 845px;; aspect-ratio: 1200 / 845; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/447fdc94-33e2-4425-88db-db337d088005"><img loading="lazy" width="1200" height="845" alt="Image" src="https://github.com/user-attachments/assets/447fdc94-33e2-4425-88db-db337d088005" style="max-width: 100%; height: auto; max-height: 845px;; aspect-ratio: 1200 / 845; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <h3>8.7 两者关系的精确定义</h3>
 <p><strong>Memory Context 不感知 work_mem</strong>：Memory Context 系统本身没有任何代码检查 <code class="notranslate">work_mem</code> 变量。</p>
 <p><strong>work_mem 不控制 Memory Context</strong>：<code class="notranslate">work_mem</code> 不是 Memory Context 的硬性上限，只是业务逻辑中的软性预算。</p>
@@ -612,7 +612,7 @@ freeptr == endptr（无剩余空间）
     <span class="pl-smi">MemoryContextCallback</span> <span class="pl-c1">*</span><span class="pl-c1">reset_cbs</span>;  <span class="pl-c">/* list of reset/delete callbacks */</span>
 } <span class="pl-smi">MemoryContextData</span>;</pre></div>
 <p><code class="notranslate">reset_cbs</code> 是 <code class="notranslate">MemoryContextData</code> 的最后一个字段，指向回调链表的<strong>头部</strong>（最新注册的回调）。</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/e2237a94-e697-4a99-a5cc-182c6069e61e"><img loading="lazy" width="1200" height="761" alt="Image" src="https://github.com/user-attachments/assets/e2237a94-e697-4a99-a5cc-182c6069e61e" style="max-width: 100%; height: auto; max-height: 761px;; aspect-ratio: 1200 / 761; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/e2237a94-e697-4a99-a5cc-182c6069e61e"><img loading="lazy" width="1200" height="761" alt="Image" src="https://github.com/user-attachments/assets/e2237a94-e697-4a99-a5cc-182c6069e61e" style="max-width: 100%; height: auto; max-height: 761px;; aspect-ratio: 1200 / 761; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <h3>9.3 回调注册注册与触发机制</h3>
 <h4>9.3.1 <strong>注册</strong>：头插法（LIFO），最新注册的回调排在最前面。</h4>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:291-302 */</span>
@@ -637,7 +637,7 @@ freeptr == endptr（无剩余空间）
 </ul>
 <h4>9.3.2 <strong>触发</strong>：</h4>
 <p>回调通过 <code class="notranslate">MemoryContextCallResetCallbacks()</code> 在以下两个路径中被触发：</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/0ebc4a31-773c-4ac1-8812-f1d23c2b7cd8"><img loading="lazy" width="1200" height="1262" alt="Image" src="https://github.com/user-attachments/assets/0ebc4a31-773c-4ac1-8812-f1d23c2b7cd8" style="max-width: 100%; height: auto; max-height: 1262px;; aspect-ratio: 1200 / 1262; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/0ebc4a31-773c-4ac1-8812-f1d23c2b7cd8"><img loading="lazy" width="1200" height="1262" alt="Image" src="https://github.com/user-attachments/assets/0ebc4a31-773c-4ac1-8812-f1d23c2b7cd8" style="max-width: 100%; height: auto; max-height: 1262px;; aspect-ratio: 1200 / 1262; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <h5><strong>路径 1: MemoryContextResetOnly</strong></h5>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">/* src/backend/utils/mmgr/mcxt.c:161-186 */</span>
 <span class="pl-smi">void</span>
@@ -912,7 +912,7 @@ freeptr == endptr（无剩余空间）
 </tbody>
 </table></markdown-accessiblity-table>
 <p><strong>核心区别</strong>：共享缓冲区缓存的是 <strong>磁盘数据页</strong>（8KB 页面），内存上下文存储的是 <strong>查询处理过程中的临时数据</strong>。</p>
-<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/2cabbdb4-5024-4606-a696-5c2a531b8f9d"><img loading="lazy" width="1200" height="888" alt="Image" src="https://github.com/user-attachments/assets/2cabbdb4-5024-4606-a696-5c2a531b8f9d" style="max-width: 100%; height: auto; max-height: 888px;; aspect-ratio: 1200 / 888; background-color: var(--bgColor-muted); border-radius: 6px; display: block" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/2cabbdb4-5024-4606-a696-5c2a531b8f9d"><img loading="lazy" width="1200" height="888" alt="Image" src="https://github.com/user-attachments/assets/2cabbdb4-5024-4606-a696-5c2a531b8f9d" style="max-width: 100%; height: auto; max-height: 888px;; aspect-ratio: 1200 / 888; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <h2>10.2. 共享缓冲区 — 磁盘页面的缓存</h2>
 <h3>10.2.1 存储内容</h3>
 <p>共享缓冲区存储的是 <strong>磁盘页面的内存映射副本</strong>，每个页面 8KB（<code class="notranslate">BLCKSZ</code>）。任何需要读写数据页的操作，都通过 <code class="notranslate">ReadBuffer()</code> 将页面加载到共享缓冲区。</p>
