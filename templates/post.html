@@ -9,7 +9,7 @@
 <meta property="og:image" content="{{ blogBase['ogImage'] }}">
 <title>{{ blogBase['postTitle'] }}</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{ blogBase['postTitle'] }}","description":"{{ blogBase['description'] }}","datePublished":"{{ blogBase['createdDate'] }}","url":"{{ blogBase['postUrl'] }}","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":{{ blogBase['postTitle'] | tojson }},"description":{{ blogBase['description'] | tojson }},"datePublished":"{{ blogBase['createdDate'] }}","url":"{{ blogBase['postUrl'] }}","author":{"@type":"Person","name":"PGStone"}}
 </script>
 {% if blogBase['highlight']==1 %}<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />{% endif %}
 {{ blogBase['head'] }}
@@ -60,6 +60,98 @@
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
 }
 </style>
 {{ blogBase['style'] }}
@@ -117,6 +209,24 @@
 {% endfor %}
 </ul>
 </div>
+{% endif %}
+{% if blogBase.get('prevPost') or blogBase.get('nextPost') %}
+<nav class="postNav">
+    {% if blogBase.get('prevPost') %}
+    <a href="/{{ blogBase['prevPost']['postUrl'] }}">
+        <span class="nav-label">&larr; 上一篇</span>
+        <span class="nav-title">{{ blogBase['prevPost']['postTitle'] }}</span>
+    </a>
+    {% else %}
+    <div></div>
+    {% endif %}
+    {% if blogBase.get('nextPost') %}
+    <a href="/{{ blogBase['nextPost']['postUrl'] }}" class="nav-next">
+        <span class="nav-label">下一篇 &rarr;</span>
+        <span class="nav-title">{{ blogBase['nextPost']['postTitle'] }}</span>
+    </a>
+    {% endif %}
+</nav>
 {% endif %}
 {% if blogBase['needComment']==1 %}
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">{{ i18n['comments'] }}</button>
@@ -245,8 +355,45 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         });
     });
+
+    // Add line numbers to code blocks
+    document.querySelectorAll('.snippet-clipboard-content').forEach(container => {
+        if (container.querySelector('.line-numbers')) return;
+        const pre = container.querySelector('pre');
+        if (!pre) return;
+        const text = pre.textContent || pre.innerText;
+        const lines = text.split('\n');
+        if (lines[lines.length - 1].trim() === '') lines.pop();
+        if (lines.length <= 1) return;
+        const gutter = document.createElement('div');
+        gutter.className = 'line-numbers';
+        for (let i = 1; i <= lines.length; i++) {
+            const span = document.createElement('span');
+            span.textContent = i;
+            gutter.appendChild(span);
+        }
+        container.insertBefore(gutter, container.firstChild);
+        container.classList.add('has-line-numbers');
+    });
 });
 {%- endif %}
+
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
+});
 
 </script>
 {{ blogBase['script'] }}

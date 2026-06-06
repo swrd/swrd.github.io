@@ -23,6 +23,7 @@
 .SideNav-item .Label{color: #fff;margin-left:4px;}
 .d-flex{min-width:0;}
 .listTitle{overflow:hidden;white-space:nowrap;text-overflow: ellipsis;max-width: 100%;}
+.listDesc{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:13px;color:var(--color-fg-muted);margin-top:4px;line-height:1.5;}
 .listLabels{white-space:nowrap;display:flex;}
 .listLabels object{max-height:16px;max-width:24px;}
 
@@ -47,7 +48,7 @@
     {%- endif -%}
 </div>
 <div class="title-right">
-    <a href="{{ blogBase['homeUrl'] }}/tag.html" id="buttonSearch" class="btn btn-invisible circle" title="{{ i18n['Search'] }}">
+    <a href="{{ blogBase['homeUrl'] }}/search.html" id="buttonSearch" class="btn btn-invisible circle" title="{{ i18n['Search'] }}">
         <svg class="octicon" width="16" height="16" >
             <path id="pathSearch" fill-rule="evenodd"></path>
         </svg>
@@ -87,7 +88,10 @@
     <div class="d-flex flex-items-center">
         <svg class="SideNav-icon octicon" style="width:16px;height:16px"><path class="svgTop{{ postListJson[num]['top'] }}" d=""></path>
         </svg>
-        <span class="listTitle">{{ postListJson[num]['postTitle']|e }}</span>
+        <div>
+            <span class="listTitle">{{ postListJson[num]['postTitle']|e }}</span>
+            {% if postListJson[num].get('description') %}<div class="listDesc">{{ postListJson[num]['description'][:100] }}</div>{% endif %}
+        </div>
     </div>
     <div class="listLabels">
         {% if postListJson[num]['commentNum']>0 %}<span class="Label" style="background-color:{{ blogBase['commentLabelColor'] }}">{{ postListJson[num]['commentNum'] }}</span>{% endif %}

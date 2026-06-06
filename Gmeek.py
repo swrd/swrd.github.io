@@ -89,7 +89,8 @@ class GMEEK():
 
     def defaultConfig(self):
         dconfig={"singlePage":[],"startSite":"","filingNum":"","onePageListNum":15,"commentLabelColor":"#006b75","yearColorList":["#bc4c00", "#0969da", "#1f883d", "#A333D0"],"i18n":"CN","themeMode":"manual","dayTheme":"light","nightTheme":"dark","urlMode":"pinyin","script":"","style":"","head":"","indexScript":"","indexStyle":"","bottomText":"","showPostSource":1,"iconList":{},"UTC":+8,"rssSplit":"sentence","exlink":{},"needComment":1,"allHead":""}
-        config=json.loads(open('config.json', 'r', encoding='utf-8').read())
+        with open('config.json', 'r', encoding='utf-8') as cf:
+            config=json.loads(cf.read())
         self.blogBase={**dconfig,**config}.copy()
         self.blogBase["postListJson"]=json.loads('{}')
         self.blogBase["singeListJson"]=json.loads('{}')
@@ -140,15 +141,13 @@ class GMEEK():
         env = Environment(loader=file_loader)
         template = env.get_template(template)
         output = template.render(blogBase=blogBase,postListJson=postListJson,i18n=self.i18n,IconList=icon)
-        f = open(htmlDir, 'w', encoding='UTF-8')
-        f.write(output)
-        f.close()
+        with open(htmlDir, 'w', encoding='UTF-8') as f:
+            f.write(output)
 
     def createPostHtml(self,issue):
         mdFileName=re.sub(r'[<>:/\\|?*\"]|[\0-\31]', '-', issue["postTitle"])
-        f = open(self.backup_dir+mdFileName+".md", 'r', encoding='UTF-8')
-        post_body=self.markdown2html(f.read())
-        f.close()
+        with open(self.backup_dir+mdFileName+".md", 'r', encoding='UTF-8') as f:
+            post_body=self.markdown2html(f.read())
 
         post_body=re.sub(r'<img (?![^>]*loading=)', '<img loading="lazy" ', post_body)
 
@@ -201,7 +200,7 @@ class GMEEK():
         postBase["head"]=issue["head"]
         postBase["top"]=issue["top"]
         postBase["postSourceUrl"]=issue["postSourceUrl"]
-        postBase["repoName"]=options.repo_name
+        postBase["repoName"]=self.options.repo_name
         postBase["createdDate"]=issue["createdDate"]
         postBase["dateLabelColor"]=issue["dateLabelColor"]
         postBase["postLabels"]=issue["labels"]
@@ -231,6 +230,19 @@ class GMEEK():
                     related.append((overlap,p))
         related.sort(key=lambda x:(-x[0],-x[1].get("createdAt",0)))
         postBase["relatedPosts"]=[{"postTitle":r[1]["postTitle"],"postUrl":r[1]["postUrl"],"createdDate":r[1].get("createdDate","")} for r in related[:5]]
+
+        # prev/next post navigation (chronological order, exclude singlePage)
+        if issue["labels"][0] not in self.blogBase["singlePage"]:
+            sorted_posts=sorted(
+                [p for p in self.blogBase["postListJson"].values() if p["labels"][0] not in self.blogBase["singlePage"]],
+                key=lambda x:x["createdAt"]
+            )
+            current_idx=next((i for i,p in enumerate(sorted_posts) if p["postTitle"]==issue["postTitle"]),-1)
+            postBase["prevPost"]={"postTitle":sorted_posts[current_idx-1]["postTitle"],"postUrl":sorted_posts[current_idx-1]["postUrl"]} if current_idx>0 else None
+            postBase["nextPost"]={"postTitle":sorted_posts[current_idx+1]["postTitle"],"postUrl":sorted_posts[current_idx+1]["postUrl"]} if 0<=current_idx<len(sorted_posts)-1 else None
+        else:
+            postBase["prevPost"]=None
+            postBase["nextPost"]=None
 
         self.renderHtml('post.html',postBase,self.blogBase["postListJson"],issue["htmlDir"],postIcon)
         print("create postPage title=%s file=%s " % (issue["postTitle"],issue["htmlDir"]))
@@ -318,19 +330,17 @@ class GMEEK():
 
         if self.oldFeedString!='':
             feed.rss_file(self.root_dir+'new.xml')
-            newFeed=open(self.root_dir+'new.xml','r',encoding='utf-8')
-            new=newFeed.read()
-            newFeed.close()
+            with open(self.root_dir+'new.xml','r',encoding='utf-8') as newFeed:
+                new=newFeed.read()
 
             new=re.sub(r'<lastBuildDate>.*?</lastBuildDate>','',new)
             old=re.sub(r'<lastBuildDate>.*?</lastBuildDate>','',self.oldFeedString)
             os.remove(self.root_dir+'new.xml')
-            
+
             if new==old:
                 print("====== rss xml no update ======")
-                feedFile=open(self.root_dir+'rss.xml',"w")
-                feedFile.write(self.oldFeedString)
-                feedFile.close()
+                with open(self.root_dir+'rss.xml',"w") as feedFile:
+                    feedFile.write(self.oldFeedString)
                 return
 
         print("====== create rss xml ======")
@@ -370,7 +380,7 @@ class GMEEK():
             self.blogBase[listJsonName][postNum]["postTitle"]=issue.title
             self.blogBase[listJsonName][postNum]["postUrl"]=urllib.parse.quote(gen_Html[len(self.root_dir):])
 
-            self.blogBase[listJsonName][postNum]["postSourceUrl"]="https://github.com/"+options.repo_name+"/issues/"+str(issue.number)
+            self.blogBase[listJsonName][postNum]["postSourceUrl"]="https://github.com/"+self.options.repo_name+"/issues/"+str(issue.number)
             self.blogBase[listJsonName][postNum]["commentNum"]=issue.get_comments().totalCount
 
             if issue.body==None:
@@ -378,14 +388,19 @@ class GMEEK():
                 self.blogBase[listJsonName][postNum]["wordCount"]=0
             else:
                 self.blogBase[listJsonName][postNum]["wordCount"]=len(issue.body)
+                desc_text=re.sub(r'^#{1,6}\s+', '', issue.body, flags=re.MULTILINE)
+                desc_text=re.sub(r'^>\s+', '', desc_text, flags=re.MULTILINE)
+                desc_text=re.sub(r'!\[.*?\]\(.*?\)', '', desc_text)
+                desc_text=re.sub(r'\[([^\]]*)\]\([^\)]*\)', r'\1', desc_text)
+                desc_text=desc_text.strip()
                 if self.blogBase["rssSplit"]=="sentence":
-                    if self.blogBase["i18n"]=="CN":
-                        period="。"
-                    else:
-                        period="."
+                    period="。" if self.blogBase["i18n"]=="CN" else "."
                 else:
                     period=self.blogBase["rssSplit"]
-                self.blogBase[listJsonName][postNum]["description"]=issue.body.split(period)[0].replace("\"", "\'")+period
+                first_sentence=desc_text.split(period)[0].replace("\"", "\'")+period
+                if len(first_sentence)>120:
+                    first_sentence=first_sentence[:120].replace("\"", "\'")+"..."
+                self.blogBase[listJsonName][postNum]["description"]=first_sentence
                 
             self.blogBase[listJsonName][postNum]["top"]=0
             for event in issue.get_events():
@@ -398,7 +413,7 @@ class GMEEK():
                 postConfig=json.loads(issue.body.split("\r\n")[-1:][0].split("##")[1])
                 print("Has Custom JSON parameters")
                 print(postConfig)
-            except:
+            except Exception:
                 postConfig={}
 
             if "timestamp" in postConfig:
@@ -433,13 +448,8 @@ class GMEEK():
             self.blogBase[listJsonName][postNum]["dateLabelColor"]=self.blogBase["yearColorList"][int(thisYear)%len(self.blogBase["yearColorList"])]
 
             mdFileName=re.sub(r'[<>:/\\|?*\"]|[\0-\31]', '-', issue.title)
-            f = open(self.backup_dir+mdFileName+".md", 'w', encoding='UTF-8')
-            
-            if issue.body==None:
-                f.write('')
-            else:
-                f.write(issue.body)
-            f.close()
+            with open(self.backup_dir+mdFileName+".md", 'w', encoding='UTF-8') as f:
+                f.write('' if issue.body==None else issue.body)
             return listJsonName
 
     def runAll(self):
@@ -504,25 +514,21 @@ if not os.path.exists("blogBase.json"):
     blog.runAll()
 else:
     if os.path.exists(blog.root_dir+'rss.xml'):
-        oldFeedFile=open(blog.root_dir+'rss.xml','r',encoding='utf-8')
-        blog.oldFeedString=oldFeedFile.read()
-        oldFeedFile.close()
+        with open(blog.root_dir+'rss.xml','r',encoding='utf-8') as oldFeedFile:
+            blog.oldFeedString=oldFeedFile.read()
     if options.issue_number=="0" or options.issue_number=="":
         print("issue_number=='0', runAll")
         blog.runAll()
     else:
-        f=open("blogBase.json","r")
-        print("blogBase is exists and issue_number!=0, runOne")
-        oldBlogBase=json.loads(f.read())
+        with open("blogBase.json","r") as f:
+            oldBlogBase=json.loads(f.read())
         for key, value in oldBlogBase.items():
             blog.blogBase[key] = value
-        f.close()
         blog.blogBase["labelColorDict"]=blog.labelColorDict
         blog.runOne(options.issue_number)
 
-listFile=open("blogBase.json","w")
-listFile.write(json.dumps(blog.blogBase))
-listFile.close()
+with open("blogBase.json","w") as listFile:
+    listFile.write(json.dumps(blog.blogBase))
 
 commentNumSum=0
 wordCount=0
@@ -551,9 +557,8 @@ for i in blog.blogBase["postListJson"]:
 
 blog.blogBase["postListJson"]["labelColorDict"]=blog.labelColorDict
 
-docListFile=open(blog.root_dir+"postList.json","w")
-docListFile.write(json.dumps(blog.blogBase["postListJson"]))
-docListFile.close()
+with open(blog.root_dir+"postList.json","w") as docListFile:
+    docListFile.write(json.dumps(blog.blogBase["postListJson"]))
 
 if os.environ.get('GITHUB_EVENT_NAME')!='schedule':
     print("====== update readme file ======")
@@ -564,7 +569,6 @@ if os.environ.get('GITHUB_EVENT_NAME')!='schedule':
     readme=readme+"### :hibiscus: %d \r\n" % wordCount
     readme=readme+"### :alarm_clock: %s \r\n" % datetime.datetime.now(blog.TZ).strftime('%Y-%m-%d %H:%M:%S')
     readme=readme+"### Powered by :heart: [Gmeek](https://github.com/Meekdai/Gmeek)\r\n"
-    readmeFile=open(workspace_path+"/README.md","w")
-    readmeFile.write(readme)
-    readmeFile.close()
+    with open(workspace_path+"/README.md","w") as readmeFile:
+        readmeFile.write(readme)
 ######################################################################################
