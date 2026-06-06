@@ -202,7 +202,11 @@ class GMEEK():
         postBase["top"]=issue["top"]
         postBase["postSourceUrl"]=issue["postSourceUrl"]
         postBase["repoName"]=options.repo_name
-        
+        postBase["createdDate"]=issue["createdDate"]
+        postBase["dateLabelColor"]=issue["dateLabelColor"]
+        postBase["postLabels"]=issue["labels"]
+        postBase["wordCount"]=issue.get("wordCount",0)
+
         if issue["labels"][0] in self.blogBase["singlePage"]:
             postBase["bottomText"]=''
 
