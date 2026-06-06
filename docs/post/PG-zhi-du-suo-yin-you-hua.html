@@ -26,7 +26,7 @@
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"PG只读索引优化","description":"现在是圣诞节，我的日常工作相对安静，所以让我们再次让它成为故事时间！另一个来自战壕的故事：一个表和一个索引会出错吗？
 
-几周前，一位用户问我为什么其中一个查询的 “性能不一致”。","datePublished":"","url":"https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
+几周前，一位用户问我为什么其中一个查询的 “性能不一致”。","datePublished":"2025-01-02","url":"https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -63,6 +63,26 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     padding: 5px 8px;
     font-size: 12px;
 }
+.postMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--color-fg-muted);
+}
+.postMeta .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.postMeta .Label {
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 2em;
+}
 </style>
 
 
@@ -94,6 +114,23 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </div>
 </div>
     <div id="content">
+<div class="postMeta">
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
+        2025-01-02
+    </span>
+    
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
+        约 7 分钟
+    </span>
+    
+    
+    <span class="Label" style="background-color:#25C821">index only scan</span>
+    
+    <span class="Label" style="background-color:#085C76">SQL优化</span>
+    
+</div>
 <div class="markdown-body" id="postBody"><p>现在是圣诞节，我的日常工作相对安静，所以让我们再次让它成为故事时间！另一个来自战壕的故事：一个表和一个索引会出错吗？</p>
 <p>几周前，一位用户问我为什么其中一个查询的 “性能不一致”。 据用户说，“有时需要 3 分钟，有时需要 30 分钟，或者永远不会完成。看了一下查询后，我可以看出实际问题不是 30+ 分钟，而是 3 分钟 —— 当你有一个几亿行的表，而你的 select 生成刚刚超过 1000 行时，这是一个经典的 “短查询”，所以你应该能够在几毫秒内获得结果。</p>
 <p>最初的查询是针对自联接的视图，起初，我怀疑视图本身有问题，但后来我从视图中提取出一个表的一个 SELECT语句，这确实非常慢：需要几分钟，而本来应该需要几秒钟。“不一致” 是由于高 I/O 造成的，并且取决于执行时共享缓冲区中的内容。 查询如下所示：</p>

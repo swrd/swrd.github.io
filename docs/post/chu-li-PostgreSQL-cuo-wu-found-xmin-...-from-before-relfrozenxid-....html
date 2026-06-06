@@ -23,7 +23,7 @@
 <title>处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."</title>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."","description":"
-我已经看到标题中报告的错误多次了。","datePublished":"","url":"https://swrd.github.io/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html","author":{"@type":"Person","name":"PGStone"}}
+我已经看到标题中报告的错误多次了。","datePublished":"2025-02-12","url":"https://swrd.github.io/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -60,6 +60,26 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     padding: 5px 8px;
     font-size: 12px;
 }
+.postMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--color-fg-muted);
+}
+.postMeta .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.postMeta .Label {
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 2em;
+}
 </style>
 
 
@@ -91,6 +111,23 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </div>
 </div>
     <div id="content">
+<div class="postMeta">
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
+        2025-02-12
+    </span>
+    
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
+        约 15 分钟
+    </span>
+    
+    
+    <span class="Label" style="background-color:#2A5560">vacuum</span>
+    
+    <span class="Label" style="background-color:#eb7e84">故障处理</span>
+    
+</div>
 <div class="markdown-body" id="postBody"><p>我已经看到标题中报告的错误多次了。如果你不熟悉 PostgreSQL 的内部结构，这条消息会令你困惑： <code class="notranslate">xmin</code> 和 <code class="notranslate">relfrozenxid</code> 是什么意思？为什么一个在另一个之前会成问题？因此，我认为写一篇文章关于这个问题以及错误的意义是值得的。我还会向你展示如何应对这种情况并修复错误。</p>
 <h2>什么是 <code class="notranslate">xmin</code> 和 <code class="notranslate">relfrozenxid</code> ？</h2>
 <h3><code class="notranslate">xmin</code> 和 <code class="notranslate">xmax</code></h3>

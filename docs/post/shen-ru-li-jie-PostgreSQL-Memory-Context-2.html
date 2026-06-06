@@ -35,7 +35,7 @@ AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。">
 
 ### 7.1 要点
 
-AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。","datePublished":"","url":"https://swrd.github.io/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html","author":{"@type":"Person","name":"PGStone"}}
+AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。","datePublished":"2026-04-20","url":"https://swrd.github.io/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -72,6 +72,26 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     padding: 5px 8px;
     font-size: 12px;
 }
+.postMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--color-fg-muted);
+}
+.postMeta .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.postMeta .Label {
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 2em;
+}
 </style>
 
 
@@ -103,6 +123,23 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </div>
 </div>
     <div id="content">
+<div class="postMeta">
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
+        2026-04-20
+    </span>
+    
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
+        约 109 分钟
+    </span>
+    
+    
+    <span class="Label" style="background-color:#2b32f4">源码解析</span>
+    
+    <span class="Label" style="background-color:#f071b2">memory context</span>
+    
+</div>
 <div class="markdown-body" id="postBody"><h2>七、超大内存分配策略</h2>
 <h3>7.1 要点</h3>
 <p>AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。对于超过 <code class="notranslate">allocChunkLimit</code>（默认 8KB）的请求，AllocSet 使用专用块（dedicated block）策略，直接调用 <code class="notranslate">malloc()</code> 分配一块恰好满足请求大小的内存。</p>
