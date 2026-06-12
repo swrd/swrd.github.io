@@ -8,7 +8,8 @@
     <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
-    <link rel="icon" href="/PostgreSQL_logo.3colors.svg"><script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -24,16 +25,14 @@
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>PG只读索引优化</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"PG只读索引优化","description":"现在是圣诞节，我的日常工作相对安静，所以让我们再次让它成为故事时间！另一个来自战壕的故事：一个表和一个索引会出错吗？
-
-几周前，一位用户问我为什么其中一个查询的 “性能不一致”。","datePublished":"2025-01-02","url":"https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"PG\u53ea\u8bfb\u7d22\u5f15\u4f18\u5316","description":"\u73b0\u5728\u662f\u5723\u8bde\u8282\uff0c\u6211\u7684\u65e5\u5e38\u5de5\u4f5c\u76f8\u5bf9\u5b89\u9759\uff0c\u6240\u4ee5\u8ba9\u6211\u4eec\u518d\u6b21\u8ba9\u5b83\u6210\u4e3a\u6545\u4e8b\u65f6\u95f4\uff01\u53e6\u4e00\u4e2a\u6765\u81ea\u6218\u58d5\u7684\u6545\u4e8b\uff1a\u4e00\u4e2a\u8868\u548c\u4e00\u4e2a\u7d22\u5f15\u4f1a\u51fa\u9519\u5417\uff1f\r\n\r\n\u51e0\u5468\u524d\uff0c\u4e00\u4f4d\u7528\u6237\u95ee\u6211\u4e3a\u4ec0\u4e48\u5176\u4e2d\u4e00\u4e2a\u67e5\u8be2\u7684 \u201c\u6027\u80fd\u4e0d\u4e00\u81f4\u201d\u3002","datePublished":"2025-01-02","url":"https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
 
 </head>
 <style>
-body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
 #header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
 #footer {margin-top:64px; text-align: center;font-size: small;}
 
@@ -82,6 +81,98 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
 }
 </style>
 
@@ -168,6 +259,19 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <p>2.PG自带的extract是只有一个是stable的，其他的都是immutable的，实际上可以创建包含后面条件的索引<br>
 <a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/7a6ea76b-a149-4e2b-970d-5b8b838237c7"><img loading="lazy" src="https://github.com/user-attachments/assets/7a6ea76b-a149-4e2b-970d-5b8b838237c7" alt="image" style="max-width: 100%;"></a></p></div>
 <div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+
+<nav class="postNav">
+    
+    <div></div>
+    
+    
+    <a href="/post/xi-shuo-vacuum-de-truncate-cao-zuo.html" class="nav-next">
+        <span class="nav-label">下一篇 &rarr;</span>
+        <span class="nav-title">细说vacuum的truncate操作</span>
+    </a>
+    
+</nav>
 
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
@@ -332,9 +436,46 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         });
     });
+
+    // Add line numbers to code blocks
+    document.querySelectorAll('.snippet-clipboard-content').forEach(container => {
+        if (container.querySelector('.line-numbers')) return;
+        const pre = container.querySelector('pre');
+        if (!pre) return;
+        const text = pre.textContent || pre.innerText;
+        const lines = text.split('\n');
+        if (lines[lines.length - 1].trim() === '') lines.pop();
+        if (lines.length <= 1) return;
+        const gutter = document.createElement('div');
+        gutter.className = 'line-numbers';
+        for (let i = 1; i <= lines.length; i++) {
+            const span = document.createElement('span');
+            span.textContent = i;
+            gutter.appendChild(span);
+        }
+        container.insertBefore(gutter, container.firstChild);
+        container.classList.add('has-line-numbers');
+    });
+});
+
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
 });
 
 </script>
-<script src='/assets/GmeekTOC.js'></script>
+<script src='/assets/GmeekTocBot.js'></script>
 
 </html>

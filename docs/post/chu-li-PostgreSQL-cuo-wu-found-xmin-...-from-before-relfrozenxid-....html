@@ -8,29 +8,27 @@
     <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
-    <link rel="icon" href="/PostgreSQL_logo.3colors.svg"><script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
-<meta name="description" content="
-我已经看到标题中报告的错误多次了。">
+<meta name="description" content="我已经看到标题中报告的错误多次了。">
 <meta property="og:title" content="处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."">
-<meta property="og:description" content="
-我已经看到标题中报告的错误多次了。">
+<meta property="og:description" content="我已经看到标题中报告的错误多次了。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://swrd.github.io/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."","description":"
-我已经看到标题中报告的错误多次了。","datePublished":"2025-02-12","url":"https://swrd.github.io/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u5904\u7406 PostgreSQL \u9519\u8bef \"found xmin ... from before relfrozenxid ...\"","description":"\u6211\u5df2\u7ecf\u770b\u5230\u6807\u9898\u4e2d\u62a5\u544a\u7684\u9519\u8bef\u591a\u6b21\u4e86\u3002","datePublished":"2025-02-12","url":"https://swrd.github.io/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
 
 </head>
 <style>
-body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
 #header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
 #footer {margin-top:64px; text-align: center;font-size: small;}
 
@@ -79,6 +77,98 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
 }
 </style>
 
@@ -227,6 +317,22 @@ DETAIL:  Could not open file <span class="pl-s"><span class="pl-pds">"</span>pg_
 
 </ul>
 </div>
+
+
+<nav class="postNav">
+    
+    <a href="/post/xi-shuo-vacuum-de-truncate-cao-zuo.html">
+        <span class="nav-label">&larr; 上一篇</span>
+        <span class="nav-title">细说vacuum的truncate操作</span>
+    </a>
+    
+    
+    <a href="/post/PG-can-shu-maintenance_work_mem-jie-xi.html" class="nav-next">
+        <span class="nav-label">下一篇 &rarr;</span>
+        <span class="nav-title">PG参数maintenance_work_mem解析</span>
+    </a>
+    
+</nav>
 
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
@@ -391,9 +497,46 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         });
     });
+
+    // Add line numbers to code blocks
+    document.querySelectorAll('.snippet-clipboard-content').forEach(container => {
+        if (container.querySelector('.line-numbers')) return;
+        const pre = container.querySelector('pre');
+        if (!pre) return;
+        const text = pre.textContent || pre.innerText;
+        const lines = text.split('\n');
+        if (lines[lines.length - 1].trim() === '') lines.pop();
+        if (lines.length <= 1) return;
+        const gutter = document.createElement('div');
+        gutter.className = 'line-numbers';
+        for (let i = 1; i <= lines.length; i++) {
+            const span = document.createElement('span');
+            span.textContent = i;
+            gutter.appendChild(span);
+        }
+        container.insertBefore(gutter, container.firstChild);
+        container.classList.add('has-line-numbers');
+    });
+});
+
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
 });
 
 </script>
-<script src='/assets/GmeekTOC.js'></script>
+<script src='/assets/GmeekTocBot.js'></script>
 
 </html>

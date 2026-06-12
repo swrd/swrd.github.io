@@ -8,7 +8,8 @@
     <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
-    <link rel="icon" href="/PostgreSQL_logo.3colors.svg"><script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -20,14 +21,14 @@
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>关于</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"关于","description":"本人DBA一枚，熟悉数据库的运维，也从事过中间件和大数据的运维。","datePublished":"2024-12-07","url":"https://swrd.github.io/about.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u5173\u4e8e","description":"\u672c\u4ebaDBA\u4e00\u679a\uff0c\u719f\u6089\u6570\u636e\u5e93\u7684\u8fd0\u7ef4\uff0c\u4e5f\u4ece\u4e8b\u8fc7\u4e2d\u95f4\u4ef6\u548c\u5927\u6570\u636e\u7684\u8fd0\u7ef4\u3002","datePublished":"2024-12-07","url":"https://swrd.github.io/about.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 
 
 
 </head>
 <style>
-body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
 #header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
 #footer {margin-top:64px; text-align: center;font-size: small;}
 
@@ -66,6 +67,98 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
 }
 </style>
 
@@ -126,6 +219,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li>数据库管理平台：实现日常数据库运维操作的自动化</li>
 </ul></div>
 <div style="font-size:small;margin-top:8px;float:right;"></div>
+
 
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
@@ -225,7 +319,24 @@ function iFrameLoading(){
 
 
 
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
+});
+
 </script>
-<script src='/assets/GmeekTOC.js'></script>
+<script src='/assets/GmeekTocBot.js'></script>
 
 </html>

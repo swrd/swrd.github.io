@@ -8,7 +8,8 @@
     <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
-    <link rel="icon" href="/PostgreSQL_logo.3colors.svg"><script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -17,7 +18,7 @@
 
 </head>
 <style>
-body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
 #header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
 #footer {margin-top:64px; text-align: center;font-size: small;}
 
@@ -133,17 +134,16 @@ document.getElementById("searchSVG").setAttribute("d",IconList["search"]);
 tagList=[];
 labelsCount={};
 jsonData='';
-let requestJson="postList.json"
-let request=new XMLHttpRequest();
-request.open("GET",requestJson);
-request.responseType='text';
-request.send();
-request.onload=function(){
-    jsonData=JSON.parse(request.response);
-    console.log(jsonData);
-    showList(labelsCount);
-    setClassDisplay(decodeURI(window.location.hash.slice(1)));
-}
+
+fetch("postList.json")
+    .then(r => r.json())
+    .then(data => {
+        jsonData=data;
+        console.log(jsonData);
+        showList(labelsCount);
+        setClassDisplay(decodeURI(window.location.hash.slice(1)));
+    })
+    .catch(err => console.error("Failed to load postList.json:", err));
 
 function showList(labelsCount){
     let SideNav=document.getElementsByClassName("SideNav")[0];
@@ -167,7 +167,7 @@ function showList(labelsCount){
         let showLabels = document.createElement("button");
         showLabels.setAttribute("class", "Label");
         showLabels.setAttribute("style", "background-color:" + jsonData['labelColorDict'][label]+";padding:4px;");
-        showLabels.innerHTML="&nbsp;&nbsp;"+label+" ";
+        showLabels.textContent="  "+label+" ";
         showLabels.setAttribute("onclick", "javascript:updateShowTag('" + label + "');");
 
         let LabelNum=document.createElement("span");
@@ -197,8 +197,8 @@ function showList(labelsCount){
             svg.appendChild(path);
 
             let title=document.createElement("span");
-            title.setAttribute("class","listTitle");
-            title.innerHTML=jsonData[i]['postTitle'];
+            title.setAttribute("class","listTitle listTitle-tag");
+            title.textContent=jsonData[i]['postTitle'];
             center.appendChild(svg);
             center.appendChild(title);
 
@@ -209,7 +209,7 @@ function showList(labelsCount){
                 let LabelName=document.createElement("span");
                 LabelName.setAttribute("class","Label LabelName");
                 LabelName.setAttribute("style","background-color:"+jsonData['labelColorDict'][label]);
-                LabelName.innerHTML=label;
+                LabelName.textContent=label;
                 listLabels.appendChild(LabelName);
             }
             let LabelTime=document.createElement("span");
@@ -270,13 +270,14 @@ function searchShow(){
     let a=0;
     window.location.hash="#"+(searchInput);
     for(let i = 0; i < lists.length; i++){
-        if(lists[i].childNodes[0].childNodes[0].childNodes[1].innerHTML.toUpperCase().indexOf(searchInput.toUpperCase())==-1){lists[i].style.display='none';}
+        let title=lists[i].querySelector('.listTitle');
+        if(title && title.textContent.toUpperCase().indexOf(searchInput.toUpperCase())==-1){lists[i].style.display='none';}
         else{lists[i].style.display='block';a=a+1;}
     }
     if(a==0){
         let notFind=document.getElementsByClassName("notFind")[0];
         notFind.style.display='block';
-        notFind.innerHTML='Not Find "'+searchInput+'"';
+        notFind.textContent='Not Find "'+searchInput+'"';
     }
     else{document.getElementsByClassName("notFind")[0].style.display='none';}
 }
