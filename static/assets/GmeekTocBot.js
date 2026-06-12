@@ -38,12 +38,12 @@ document.addEventListener("DOMContentLoaded", function() {
     });
 
     createTOC();
-    var css = '.toc{position:fixed;top:130px;left:50%;transform:translateX(50%) translateX(320px);width:200px;padding-left:30px;max-height:70vh;overflow-y:auto;}'
+    var css = '.toc{position:fixed;top:130px;left:50%;transform:translateX(50%) translateX(310px);width:260px;padding:12px 16px;max-height:70vh;overflow-y:auto;}'
         + '.toc .toc-list{list-style:none;padding-left:0;}'
-        + '.toc .toc-link{display:block;padding:4px 0;font-size:14px;color:var(--color-fg-muted);text-decoration:none;line-height:1.5;}'
+        + '.toc .toc-link{display:block;padding:4px 6px;font-size:14px;color:var(--color-fg-muted);text-decoration:none;line-height:1.5;}'
         + '.toc .toc-link:hover{color:var(--color-accent-fg);}'
         + '.toc .is-active-link{color:var(--color-accent-fg);font-weight:600;}'
-        + '@media(max-width:1249px){.toc{position:static;top:auto;left:auto;transform:none;padding:10px;margin-bottom:20px;max-height:40vh;width:60%;}}';
+        + '@media(max-width:1249px){.toc{position:static;top:auto;left:auto;transform:none;padding:12px 16px;margin:0 auto 20px auto;max-height:40vh;width:80%;}}';
     loadResource('style', {css: css});
 
     loadResource('script', { src: 'https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.27.4/tocbot.min.js' }, function() {
