@@ -94,11 +94,6 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
         </svg>
         <div>
             <span class="listTitle">深入理解 PostgreSQL Memory Context (2)</span>
-            <div class="listDesc">七、超大内存分配策略
-
-7.1 要点
-
-AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -112,7 +107,6 @@ AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。</div>
         </svg>
         <div>
             <span class="listTitle">深入理解 PostgreSQL Memory Context (1)</span>
-            <div class="listDesc">之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -126,11 +120,6 @@ AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。</div>
         </svg>
         <div>
             <span class="listTitle">PostgreSQL Ring  Buffer 机制详解</span>
-            <div class="listDesc">1. 概述
-
-1.1 什么是 Buffer Ring
-
-PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（Buffer Access Strategy），用于优</div>
         </div>
     </div>
     <div class="listLabels">
@@ -144,9 +133,6 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
         </svg>
         <div>
             <span class="listTitle">深入理解 postgresql buffer usage_count</span>
-            <div class="listDesc">1. 概述
-
-`usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -160,13 +146,6 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
         </svg>
         <div>
             <span class="listTitle">深入理解PostgreSQL_Buffer_Pin机制</span>
-            <div class="listDesc">一、Buffer Pin 的本质：三个字——'不准动'
-
-1.1 核心定义
-
-**Pin**（钉住）的含义非常简单：
-
-只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会</div>
         </div>
     </div>
     <div class="listLabels">
@@ -180,11 +159,6 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
         </svg>
         <div>
             <span class="listTitle">深入探索 PostgreSQL 18 的新特性</span>
-            <div class="listDesc">译自：https://xata.io/blog/going-down-the-rabbit-hole-of-postgres-18-features
-
-部分内容略作修改
-
-上周，PostgreSQL </div>
         </div>
     </div>
     <div class="listLabels">
@@ -198,11 +172,6 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
         </svg>
         <div>
             <span class="listTitle">pg_rewind为什么需要开启 wal_log_hins</span>
-            <div class="listDesc">一、`wal_log_hints`参数作用
-
-（一）Hint bits机制概述
-
-在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -216,12 +185,6 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
         </svg>
         <div>
             <span class="listTitle">PG参数autovacuum_naptime解析</span>
-            <div class="listDesc">PG autovacuum_naptime 介绍
-
-autovacuum_naptime 参数官方文档描述如下：
-
-```yaml
-Specifies the minimum delay betwee</div>
         </div>
     </div>
     <div class="listLabels">
@@ -235,9 +198,6 @@ Specifies the minimum delay betwee</div>
         </svg>
         <div>
             <span class="listTitle">PG参数maintenance_work_mem解析</span>
-            <div class="listDesc">PG maintenance_work_mem介绍
-
-PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_mem，如果没有设置autovacuum_</div>
         </div>
     </div>
     <div class="listLabels">
@@ -251,7 +211,6 @@ PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_me
         </svg>
         <div>
             <span class="listTitle">处理 PostgreSQL 错误 &#34;found xmin ... from before relfrozenxid ...&#34;</span>
-            <div class="listDesc">我已经看到标题中报告的错误多次了。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -265,9 +224,6 @@ PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_me
         </svg>
         <div>
             <span class="listTitle">细说vacuum的truncate操作</span>
-            <div class="listDesc">引入
-
-表级别的storage parameter参数vacuum_truncate是在PG12后引入的，加入该参数用来控制是否回收表尾部的空闲空间，在之前的版本中默认是一直回收表尾部的空闲空间。</div>
         </div>
     </div>
     <div class="listLabels">
@@ -281,9 +237,6 @@ PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_me
         </svg>
         <div>
             <span class="listTitle">PG只读索引优化</span>
-            <div class="listDesc">现在是圣诞节，我的日常工作相对安静，所以让我们再次让它成为故事时间！另一个来自战壕的故事：一个表和一个索引会出错吗？
-
-几周前，一位用户问我为什么其中一个查询的 “性能不一致”。</div>
         </div>
     </div>
     <div class="listLabels">
