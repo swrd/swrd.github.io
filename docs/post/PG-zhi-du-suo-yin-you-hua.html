@@ -9,7 +9,7 @@
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
-    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pgstone.qzz.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -21,11 +21,11 @@
 
 几周前，一位用户问我为什么其中一个查询的 “性能不一致”。">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html">
+<meta property="og:url" content="https://pgstone.qzz.io/post/PG-zhi-du-suo-yin-you-hua.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>PG只读索引优化</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"PG\u53ea\u8bfb\u7d22\u5f15\u4f18\u5316","description":"\u73b0\u5728\u662f\u5723\u8bde\u8282\uff0c\u6211\u7684\u65e5\u5e38\u5de5\u4f5c\u76f8\u5bf9\u5b89\u9759\uff0c\u6240\u4ee5\u8ba9\u6211\u4eec\u518d\u6b21\u8ba9\u5b83\u6210\u4e3a\u6545\u4e8b\u65f6\u95f4\uff01\u53e6\u4e00\u4e2a\u6765\u81ea\u6218\u58d5\u7684\u6545\u4e8b\uff1a\u4e00\u4e2a\u8868\u548c\u4e00\u4e2a\u7d22\u5f15\u4f1a\u51fa\u9519\u5417\uff1f\r\n\r\n\u51e0\u5468\u524d\uff0c\u4e00\u4f4d\u7528\u6237\u95ee\u6211\u4e3a\u4ec0\u4e48\u5176\u4e2d\u4e00\u4e2a\u67e5\u8be2\u7684 \u201c\u6027\u80fd\u4e0d\u4e00\u81f4\u201d\u3002","datePublished":"2025-01-02","url":"https://swrd.github.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"PG\u53ea\u8bfb\u7d22\u5f15\u4f18\u5316","description":"\u73b0\u5728\u662f\u5723\u8bde\u8282\uff0c\u6211\u7684\u65e5\u5e38\u5de5\u4f5c\u76f8\u5bf9\u5b89\u9759\uff0c\u6240\u4ee5\u8ba9\u6211\u4eec\u518d\u6b21\u8ba9\u5b83\u6210\u4e3a\u6545\u4e8b\u65f6\u95f4\uff01\u53e6\u4e00\u4e2a\u6765\u81ea\u6218\u58d5\u7684\u6545\u4e8b\uff1a\u4e00\u4e2a\u8868\u548c\u4e00\u4e2a\u7d22\u5f15\u4f1a\u51fa\u9519\u5417\uff1f\r\n\r\n\u51e0\u5468\u524d\uff0c\u4e00\u4f4d\u7528\u6237\u95ee\u6211\u4e3a\u4ec0\u4e48\u5176\u4e2d\u4e00\u4e2a\u67e5\u8be2\u7684 \u201c\u6027\u80fd\u4e0d\u4e00\u81f4\u201d\u3002","datePublished":"2025-01-02","url":"https://pgstone.qzz.io/post/PG-zhi-du-suo-yin-you-hua.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -183,7 +183,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="header">
 <h1 class="postTitle">PG只读索引优化</h1>
 <div class="title-right">
-    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+    <a href="https://pgstone.qzz.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>
         </svg>
@@ -278,7 +278,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <div class="comments" id="comments"></div>
 
 </div>
-    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pgstone.qzz.io">PGStone</a></div>
 <div id="footer2">
     <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
 </div>

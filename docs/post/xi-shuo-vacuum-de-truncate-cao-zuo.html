@@ -9,7 +9,7 @@
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
-    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pgstone.qzz.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -21,11 +21,11 @@
 
 表级别的storage parameter参数vacuum_truncate是在PG12后引入的，加入该参数用来控制是否回收表尾部的空闲空间，在之前的版本中默认是一直回收表尾部的空闲空间。">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://swrd.github.io/post/xi-shuo-vacuum-de-truncate-cao-zuo.html">
+<meta property="og:url" content="https://pgstone.qzz.io/post/xi-shuo-vacuum-de-truncate-cao-zuo.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>细说vacuum的truncate操作</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u7ec6\u8bf4vacuum\u7684truncate\u64cd\u4f5c","description":"\u5f15\u5165\r\n\r\n\u8868\u7ea7\u522b\u7684storage parameter\u53c2\u6570vacuum_truncate\u662f\u5728PG12\u540e\u5f15\u5165\u7684\uff0c\u52a0\u5165\u8be5\u53c2\u6570\u7528\u6765\u63a7\u5236\u662f\u5426\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\uff0c\u5728\u4e4b\u524d\u7684\u7248\u672c\u4e2d\u9ed8\u8ba4\u662f\u4e00\u76f4\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\u3002","datePublished":"2025-01-10","url":"https://swrd.github.io/post/xi-shuo-vacuum-de-truncate-cao-zuo.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u7ec6\u8bf4vacuum\u7684truncate\u64cd\u4f5c","description":"\u5f15\u5165\r\n\r\n\u8868\u7ea7\u522b\u7684storage parameter\u53c2\u6570vacuum_truncate\u662f\u5728PG12\u540e\u5f15\u5165\u7684\uff0c\u52a0\u5165\u8be5\u53c2\u6570\u7528\u6765\u63a7\u5236\u662f\u5426\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\uff0c\u5728\u4e4b\u524d\u7684\u7248\u672c\u4e2d\u9ed8\u8ba4\u662f\u4e00\u76f4\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\u3002","datePublished":"2025-01-10","url":"https://pgstone.qzz.io/post/xi-shuo-vacuum-de-truncate-cao-zuo.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -183,7 +183,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="header">
 <h1 class="postTitle">细说vacuum的truncate操作</h1>
 <div class="title-right">
-    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+    <a href="https://pgstone.qzz.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>
         </svg>
@@ -428,7 +428,7 @@ Discussion: https://postgr.es/m/CAHGQGwE5UqFqSq1=kV3QtTUtXphTdyHA-8rAj4A=Y+e4kyp
 <div class="comments" id="comments"></div>
 
 </div>
-    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pgstone.qzz.io">PGStone</a></div>
 <div id="footer2">
     <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
 </div>

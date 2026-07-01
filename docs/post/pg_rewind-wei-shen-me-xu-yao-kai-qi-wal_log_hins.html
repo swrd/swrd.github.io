@@ -9,7 +9,7 @@
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
-    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://swrd.github.io/rss.xml"><script>
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pgstone.qzz.io/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -25,11 +25,11 @@
 
 在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://swrd.github.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html">
+<meta property="og:url" content="https://pgstone.qzz.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>pg_rewind为什么需要开启 wal_log_hins</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"pg_rewind\u4e3a\u4ec0\u4e48\u9700\u8981\u5f00\u542f wal_log_hins","description":"\u4e00\u3001`wal_log_hints`\u53c2\u6570\u4f5c\u7528\n\n\uff08\u4e00\uff09Hint bits\u673a\u5236\u6982\u8ff0\n\n\u5728PostgreSQL\u4e2d\uff0cHint bits\u662f\u4e00\u79cd\u7528\u4e8e\u4f18\u5316\u6027\u80fd\u7684\u91cd\u8981\u673a\u5236\uff0c\u5b83\u5b58\u50a8\u5728\u5143\u7ec4\uff08tuple\uff09\u5934\u90e8\u3002","datePublished":"2025-05-16","url":"https://swrd.github.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"pg_rewind\u4e3a\u4ec0\u4e48\u9700\u8981\u5f00\u542f wal_log_hins","description":"\u4e00\u3001`wal_log_hints`\u53c2\u6570\u4f5c\u7528\n\n\uff08\u4e00\uff09Hint bits\u673a\u5236\u6982\u8ff0\n\n\u5728PostgreSQL\u4e2d\uff0cHint bits\u662f\u4e00\u79cd\u7528\u4e8e\u4f18\u5316\u6027\u80fd\u7684\u91cd\u8981\u673a\u5236\uff0c\u5b83\u5b58\u50a8\u5728\u5143\u7ec4\uff08tuple\uff09\u5934\u90e8\u3002","datePublished":"2025-05-16","url":"https://pgstone.qzz.io/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 
 
@@ -187,7 +187,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="header">
 <h1 class="postTitle">pg_rewind为什么需要开启 wal_log_hins</h1>
 <div class="title-right">
-    <a href="https://swrd.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+    <a href="https://pgstone.qzz.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>
         </svg>
@@ -370,7 +370,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <div class="comments" id="comments"></div>
 
 </div>
-    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://swrd.github.io">PGStone</a></div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pgstone.qzz.io">PGStone</a></div>
 <div id="footer2">
     <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
 </div>
