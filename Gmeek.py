@@ -140,7 +140,9 @@ class GMEEK():
         file_loader = FileSystemLoader('templates')
         env = Environment(loader=file_loader)
         template = env.get_template(template)
-        output = template.render(blogBase=blogBase,postListJson=postListJson,i18n=self.i18n,IconList=icon)
+        relPath=htmlDir[len(self.root_dir):]
+        canonicalUrl=blogBase["homeUrl"] if relPath=="index.html" else blogBase["homeUrl"]+"/"+relPath
+        output = template.render(blogBase=blogBase,postListJson=postListJson,i18n=self.i18n,IconList=icon,canonicalUrl=canonicalUrl)
         with open(htmlDir, 'w', encoding='UTF-8') as f:
             f.write(output)
 

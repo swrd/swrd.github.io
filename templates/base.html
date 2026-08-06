@@ -10,6 +10,7 @@
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="{{ blogBase['faviconUrl'] }}">
     <link rel="alternate" type="application/rss+xml" title="{{ blogBase['title'] }}" href="{{ blogBase['homeUrl'] }}/rss.xml">
+    <link rel="canonical" href="{{ canonicalUrl }}">
     {%- if blogBase['themeMode']=='manual' -%}
     <script>
         let theme = localStorage.getItem("meek_theme") || "light";
