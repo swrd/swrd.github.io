@@ -9,7 +9,7 @@
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
-    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pgstone.qzz.io/rss.xml"><script>
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pg-internal.com/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -21,11 +21,11 @@
 
 `usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://pgstone.qzz.io/post/shen-ru-li-jie-postgresql-buffer-usage_count.html">
+<meta property="og:url" content="https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>深入理解 postgresql buffer usage_count</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3 postgresql buffer usage_count","description":"1. \u6982\u8ff0\n\n`usagecount`\uff08\u4f7f\u7528\u8ba1\u6570\uff09\u662f PostgreSQL \u7f13\u51b2\u533a\u7ba1\u7406\u4e2d\u5b9e\u73b0**\u65f6\u949f\u626b\u63cf\uff08Clock Sweep\uff09\u7b97\u6cd5**\u7684\u6838\u5fc3\u6570\u636e\u7ed3\u6784\u3002","datePublished":"2026-01-26","url":"https://pgstone.qzz.io/post/shen-ru-li-jie-postgresql-buffer-usage_count.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3 postgresql buffer usage_count","description":"1. \u6982\u8ff0\n\n`usagecount`\uff08\u4f7f\u7528\u8ba1\u6570\uff09\u662f PostgreSQL \u7f13\u51b2\u533a\u7ba1\u7406\u4e2d\u5b9e\u73b0**\u65f6\u949f\u626b\u63cf\uff08Clock Sweep\uff09\u7b97\u6cd5**\u7684\u6838\u5fc3\u6570\u636e\u7ed3\u6784\u3002","datePublished":"2026-01-26","url":"https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -183,7 +183,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="header">
 <h1 class="postTitle">深入理解 postgresql buffer usage_count</h1>
 <div class="title-right">
-    <a href="https://pgstone.qzz.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+    <a href="https://pg-internal.com" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>
         </svg>
@@ -914,7 +914,7 @@ CREATE EXTENSION pg_buffercache;
 <div class="comments" id="comments"></div>
 
 </div>
-    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pgstone.qzz.io">PGStone</a></div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pg-internal.com">PGStone</a></div>
 <div id="footer2">
     <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
 </div>

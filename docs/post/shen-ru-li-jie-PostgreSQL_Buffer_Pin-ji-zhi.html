@@ -9,7 +9,7 @@
     <script src='/assets/GmeekVercount.js'></script>
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
-    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pgstone.qzz.io/rss.xml"><script>
+    <link rel="alternate" type="application/rss+xml" title="PGStone" href="https://pg-internal.com/rss.xml"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
@@ -29,11 +29,11 @@
 
 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://pgstone.qzz.io/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html">
+<meta property="og:url" content="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
 <title>深入理解PostgreSQL_Buffer_Pin机制</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3PostgreSQL_Buffer_Pin\u673a\u5236","description":"\u4e00\u3001Buffer Pin \u7684\u672c\u8d28\uff1a\u4e09\u4e2a\u5b57\u2014\u2014\u0027\u4e0d\u51c6\u52a8\u0027\n\n1.1 \u6838\u5fc3\u5b9a\u4e49\n\n**Pin**\uff08\u9489\u4f4f\uff09\u7684\u542b\u4e49\u975e\u5e38\u7b80\u5355\uff1a\n\n\u53ea\u8981\u6709\u8fdb\u7a0b\u5bf9\u67d0\u4e2a Buffer \u6301\u6709 Pin\uff0c\u8fd9\u4e2a Buffer \u5c31**\u7edd\u5bf9\u4e0d\u4f1a**\u88ab\u6dd8\u6c70\u66ff\u6362\u3002","datePublished":"2026-01-11","url":"https://pgstone.qzz.io/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3PostgreSQL_Buffer_Pin\u673a\u5236","description":"\u4e00\u3001Buffer Pin \u7684\u672c\u8d28\uff1a\u4e09\u4e2a\u5b57\u2014\u2014\u0027\u4e0d\u51c6\u52a8\u0027\n\n1.1 \u6838\u5fc3\u5b9a\u4e49\n\n**Pin**\uff08\u9489\u4f4f\uff09\u7684\u542b\u4e49\u975e\u5e38\u7b80\u5355\uff1a\n\n\u53ea\u8981\u6709\u8fdb\u7a0b\u5bf9\u67d0\u4e2a Buffer \u6301\u6709 Pin\uff0c\u8fd9\u4e2a Buffer \u5c31**\u7edd\u5bf9\u4e0d\u4f1a**\u88ab\u6dd8\u6c70\u66ff\u6362\u3002","datePublished":"2026-01-11","url":"https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
@@ -191,7 +191,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <div id="header">
 <h1 class="postTitle">深入理解PostgreSQL_Buffer_Pin机制</h1>
 <div class="title-right">
-    <a href="https://pgstone.qzz.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+    <a href="https://pg-internal.com" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>
         </svg>
@@ -1062,7 +1062,7 @@ for a different page at any instant, so touching it is unsafe.
 <div class="comments" id="comments"></div>
 
 </div>
-    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pgstone.qzz.io">PGStone</a></div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pg-internal.com">PGStone</a></div>
 <div id="footer2">
     <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
 </div>
