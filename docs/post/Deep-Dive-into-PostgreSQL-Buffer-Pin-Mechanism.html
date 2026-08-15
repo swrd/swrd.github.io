@@ -10,31 +10,27 @@
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
     <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
-    <link rel="canonical" href="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html"><script>
+    <link rel="canonical" href="https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html"><script>
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
-<meta name="description" content="一、Buffer Pin 的本质：三个字——'不准动'
+<meta name="description" content="1. The Essence of a Buffer Pin: Three Words — 'Don't Touch It'
 
-1.1 核心定义
+1.1 The Core Definition
 
-**Pin**（钉住）的含义非常简单：
+The meaning of **Pin** is r...">
+<meta property="og:title" content="Deep Dive into PostgreSQL Buffer Pin Mechanism">
+<meta property="og:description" content="1. The Essence of a Buffer Pin: Three Words — 'Don't Touch It'
 
-只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。">
-<meta property="og:title" content="深入理解PostgreSQL_Buffer_Pin机制">
-<meta property="og:description" content="一、Buffer Pin 的本质：三个字——'不准动'
+1.1 The Core Definition
 
-1.1 核心定义
-
-**Pin**（钉住）的含义非常简单：
-
-只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。">
+The meaning of **Pin** is r...">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html">
+<meta property="og:url" content="https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html">
 <meta property="og:image" content="https://pg-internal.com/avatar.jpg">
-<title>深入理解PostgreSQL_Buffer_Pin机制</title>
+<title>Deep Dive into PostgreSQL Buffer Pin Mechanism</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3PostgreSQL_Buffer_Pin\u673a\u5236","description":"\u4e00\u3001Buffer Pin \u7684\u672c\u8d28\uff1a\u4e09\u4e2a\u5b57\u2014\u2014\u0027\u4e0d\u51c6\u52a8\u0027\r\n\r\n1.1 \u6838\u5fc3\u5b9a\u4e49\r\n\r\n**Pin**\uff08\u9489\u4f4f\uff09\u7684\u542b\u4e49\u975e\u5e38\u7b80\u5355\uff1a\r\n\r\n\u53ea\u8981\u6709\u8fdb\u7a0b\u5bf9\u67d0\u4e2a Buffer \u6301\u6709 Pin\uff0c\u8fd9\u4e2a Buffer \u5c31**\u7edd\u5bf9\u4e0d\u4f1a**\u88ab\u6dd8\u6c70\u66ff\u6362\u3002","datePublished":"2026-01-11","url":"https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Deep Dive into PostgreSQL Buffer Pin Mechanism","description":"1. The Essence of a Buffer Pin: Three Words \u2014 \u0027Don\u0027t Touch It\u0027\r\n\r\n1.1 The Core Definition\r\n\r\nThe meaning of **Pin** is r...","datePublished":"2026-08-15","url":"https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="/assets/starry-night.css" rel="stylesheet" />
 
@@ -190,10 +186,10 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 
 <body>
     <div id="header">
-<h1 class="postTitle">深入理解PostgreSQL_Buffer_Pin机制</h1>
+<h1 class="postTitle">Deep Dive into PostgreSQL Buffer Pin Mechanism</h1>
 <div class="title-right">
     
-    <a href="/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html" class="btn btn-invisible circle" style="font-size:12px;font-weight:600;" title="Switch to English">EN</a>
+    <a href="/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html" class="btn btn-invisible circle" style="font-size:12px;font-weight:600;" title="切换到中文版">中</a>
     
     <a href="https://pg-internal.com" id="buttonHome" class="btn btn-invisible circle" title="首页">
         <svg class="octicon" width="16" height="16">
@@ -201,7 +197,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
         </svg>
     </a>
     
-    <a href="https://github.com/swrd/swrd.github.io/issues/12" target="_blank" class="btn btn-invisible circle" title="Issue">
+    <a href="https://github.com/swrd/swrd.github.io/issues/17" target="_blank" class="btn btn-invisible circle" title="Issue">
         <svg class="octicon" width="16" height="16">
             <path id="pathIssue" fill-rule="evenodd"></path>
         </svg>
@@ -220,12 +216,12 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <div class="postMeta">
     <span class="meta-item">
         <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
-        2026-01-11
+        2026-08-15
     </span>
     
     <span class="meta-item">
         <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
-        约 61 分钟
+        约 82 分钟
     </span>
     
     
@@ -234,54 +230,54 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     <span class="Label" style="background-color:#2b32f4">源码解析</span>
     
 </div>
-<div class="markdown-body" id="postBody"><h2>一、Buffer Pin 的本质：三个字——"不准动"</h2>
-<h3>1.1 核心定义</h3>
-<p><strong>Pin</strong>（钉住）的含义非常简单：</p>
+<div class="markdown-body" id="postBody"><h2>1. The Essence of a Buffer Pin: Three Words — "Don't Touch It"</h2>
+<h3>1.1 The Core Definition</h3>
+<p>The meaning of <strong>Pin</strong> is remarkably simple:</p>
 <blockquote>
-<p>只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就<strong>绝对不会</strong>被淘汰替换。</p>
+<p>As long as any process holds a pin on a buffer, that buffer will <strong>never, under any circumstances</strong> be evicted and replaced.</p>
 </blockquote>
-<p>这是 PostgreSQL 缓冲区管理的<strong>硬性约束</strong>，没有任何例外。</p>
-<p>来看源码中的权威定义（<code class="notranslate">src/backend/storage/buffer/README:35</code>）：</p>
+<p>This is a <strong>hard invariant</strong> of PostgreSQL buffer management. There are no exceptions.</p>
+<p>Here is the authoritative definition from the source code (<code class="notranslate">src/backend/storage/buffer/README:35</code>):</p>
 <pre class="notranslate"><code class="notranslate">Pins: one must "hold a pin on" a buffer before being allowed to do anything
 at all with it. An unpinned buffer is subject to being reclaimed and reused
 for a different page at any instant, so touching it is unsafe.
 </code></pre>
-<p>翻译过来就是：</p>
+<p>In other words:</p>
 <ul>
-<li>想对 Buffer 做任何操作，必须先 Pin 住它</li>
-<li>没有 Pin 的 Buffer 随时可能被回收替换</li>
-<li>访问未 Pin 的 Buffer 是<strong>不安全</strong>的</li>
+<li>Before you can do <em>anything</em> with a buffer, you must pin it first</li>
+<li>An unpinned buffer may be reclaimed and reused at any moment</li>
+<li>Touching an unpinned buffer is <strong>unsafe</strong></li>
 </ul>
-<h3>1.2 refcount：Pin 的技术实现</h3>
-<p>在 PostgreSQL 中，Pin 是通过 <strong>引用计数（refcount）</strong> 实现的。</p>
-<p>每个 Buffer 描述符（<code class="notranslate">BufferDesc</code>）中有一个 32 位的 <code class="notranslate">state</code> 字段，其中<strong>低 18 位</strong>就是 refcount：</p>
+<h3>1.2 refcount: How a Pin Is Implemented</h3>
+<p>In PostgreSQL, a pin is implemented as a <strong>reference count (refcount)</strong>.</p>
+<p>Every buffer descriptor (<code class="notranslate">BufferDesc</code>) contains a 32-bit <code class="notranslate">state</code> field, whose <strong>lowest 18 bits</strong> hold the refcount:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/include/storage/buf_internals.h:29-33</span>
 <span class="pl-c">/*</span>
 <span class="pl-c"> * Buffer state is a single 32-bit variable where following data is combined.</span>
 <span class="pl-c"> *</span>
-<span class="pl-c"> * - 18 bits refcount      &lt;- Pin 计数</span>
-<span class="pl-c"> * - 4 bits usage count    &lt;- 使用频率</span>
-<span class="pl-c"> * - 10 bits of flags      &lt;- 状态标志</span>
+<span class="pl-c"> * - 18 bits refcount      &lt;- Pin count</span>
+<span class="pl-c"> * - 4 bits usage count    &lt;- Frequency of use</span>
+<span class="pl-c"> * - 10 bits of flags      &lt;- State flags</span>
 <span class="pl-c"> */</span>
 <span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span> 1
-<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_MASK</span> ((1U &lt;&lt; 18) - 1)  // 最大值 262,143</pre></div>
-<p><strong>关键数值</strong>：</p>
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_MASK</span> ((1U &lt;&lt; 18) - 1)  // max value 262,143</pre></div>
+<p><strong>Key numbers</strong>:</p>
 <ul>
-<li>位宽：18 位</li>
-<li>最大值：2^18 - 1 = <strong>262,143</strong></li>
-<li>含义：最多支持 26 万多个进程同时 Pin 同一个 Buffer</li>
+<li>Width: 18 bits</li>
+<li>Maximum: 2^18 - 1 = <strong>262,143</strong></li>
+<li>Meaning: more than 260,000 processes can pin the same buffer simultaneously</li>
 </ul>
-<p>从 <code class="notranslate">src/include/storage/buf_internals.h</code> 可以看到，<code class="notranslate">BufferDesc</code> 中的 <code class="notranslate">state</code> 字段是一个 32 位原子变量，同时存储了 refcount 和 usage_count：</p>
+<p>As shown in <code class="notranslate">src/include/storage/buf_internals.h</code>, the <code class="notranslate">state</code> field inside <code class="notranslate">BufferDesc</code> is a 32-bit atomic variable that stores both refcount and usage_count:</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3"><img loading="lazy" width="1098" height="691" alt="Image" src="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3" style="max-width: 100%; height: auto; max-height: 691px;; aspect-ratio: 1098 / 691; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <hr>
-<h2>二、Pin、Lock、Usage Count：三剑客的分工</h2>
-<p>很多人容易混淆 Pin、Lock 和 Usage Count。让我用一张图说清楚：</p>
+<h2>2. Pin, Lock, and Usage Count: The Division of Labor</h2>
+<p>People often confuse Pin, Lock, and Usage Count. One diagram is worth a thousand words:</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2"><img loading="lazy" width="1049" height="486" alt="Image" src="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2" style="max-width: 100%; height: auto; max-height: 486px;; aspect-ratio: 1049 / 486; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<h3>2.1 三者对比</h3>
+<h3>2.1 Side-by-Side Comparison</h3>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th align="left">特性</th>
+<th align="left">Property</th>
 <th align="left"><strong>Pin (refcount)</strong></th>
 <th align="left"><strong>Lock (content_lock)</strong></th>
 <th align="left"><strong>Usage Count</strong></th>
@@ -289,296 +285,296 @@ for a different page at any instant, so touching it is unsafe.
 </thead>
 <tbody>
 <tr>
-<td align="left"><strong>核心作用</strong></td>
-<td align="left">防止 Buffer 被淘汰</td>
-<td align="left">保护数据内容的并发访问</td>
-<td align="left">影响淘汰优先级</td>
+<td align="left"><strong>Purpose</strong></td>
+<td align="left">Prevents buffer eviction</td>
+<td align="left">Protects data contents during concurrent access</td>
+<td align="left">Influences eviction priority</td>
 </tr>
 <tr>
-<td align="left"><strong>类比</strong></td>
-<td align="left">借阅证</td>
-<td align="left">阅览室门锁</td>
-<td align="left">热门程度</td>
+<td align="left"><strong>Analogy</strong></td>
+<td align="left">Library card</td>
+<td align="left">Reading-room door lock</td>
+<td align="left">Popularity</td>
 </tr>
 <tr>
-<td align="left"><strong>持有时间</strong></td>
-<td align="left">可以较长</td>
-<td align="left">必须短暂</td>
-<td align="left">N/A（自动管理）</td>
+<td align="left"><strong>Hold duration</strong></td>
+<td align="left">Can be long</td>
+<td align="left">Must be short</td>
+<td align="left">N/A (managed automatically)</td>
 </tr>
 <tr>
-<td align="left"><strong>硬性约束</strong></td>
-<td align="left">✅ 是</td>
-<td align="left">✅ 是</td>
-<td align="left">❌ 否（软约束）</td>
+<td align="left"><strong>Hard invariant</strong></td>
+<td align="left">✅ Yes</td>
+<td align="left">✅ Yes</td>
+<td align="left">❌ No (soft signal)</td>
 </tr>
 <tr>
-<td align="left"><strong>值范围</strong></td>
+<td align="left"><strong>Value range</strong></td>
 <td align="left">0 ~ 262,143</td>
-<td align="left">共享/排他/无</td>
+<td align="left">Shared / Exclusive / None</td>
 <td align="left">0 ~ 5</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<h3>2.2 依赖关系：必须先 Pin 后 Lock</h3>
-<p>这是 PostgreSQL 的铁律（<code class="notranslate">README:35</code>）：</p>
+<h3>2.2 The Dependency: Pin Before Lock</h3>
+<p>This is the iron rule of PostgreSQL (<code class="notranslate">README:35</code>):</p>
 <blockquote>
 <p><strong>"One must pin a buffer before trying to lock it."</strong></p>
 </blockquote>
-<p>为什么？想想看：</p>
+<p>Why? Consider this:</p>
 <ol>
-<li>你先获取了 Buffer 的内容锁</li>
-<li>但这时另一个进程把这个 Buffer 淘汰了，换成了另一个页面</li>
-<li>你还在读写原来的数据？<strong>灾难</strong>！</li>
+<li>You acquire the content lock on a buffer</li>
+<li>Meanwhile, another process evicts that buffer and reuses it for a different page</li>
+<li>You are still reading the old data? <strong>Disaster!</strong></li>
 </ol>
-<p>所以必须先 Pin（保证 Buffer 不被替换），再 Lock（保证内容不被并发修改）。</p>
+<p>That is why you must pin first (to guarantee the buffer won't be replaced), then lock (to guarantee the contents won't be modified concurrently).</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811"><img loading="lazy" width="1060" height="703" alt="Image" src="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811" style="max-width: 100%; height: auto; max-height: 703px;; aspect-ratio: 1060 / 703; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<h3>2.3 五条访问规则</h3>
-<p><code class="notranslate">README</code> 文档定义了 5 条 Buffer 访问规则：</p>
+<h3>2.3 The Five Access Rules</h3>
+<p>The <code class="notranslate">README</code> defines 5 buffer access rules:</p>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th align="center">规则</th>
-<th align="left">需要</th>
-<th align="left">操作</th>
+<th align="center">Rule</th>
+<th align="left">Requires</th>
+<th align="left">Operation</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td align="center"><strong>#1</strong></td>
-<td align="left">Pin + (共享或排他)Lock</td>
-<td align="left">扫描页面、检查元组可见性</td>
+<td align="left">Pin + (shared or exclusive) Lock</td>
+<td align="left">Scan a page, check tuple visibility</td>
 </tr>
 <tr>
 <td align="center"><strong>#2</strong></td>
-<td align="left">仅 Pin</td>
-<td align="left">访问已确定可见的元组数据</td>
+<td align="left">Pin only</td>
+<td align="left">Access tuple data whose visibility is already determined</td>
 </tr>
 <tr>
 <td align="center"><strong>#3</strong></td>
-<td align="left">Pin + 排他 Lock</td>
-<td align="left">添加元组或修改 xmin/xmax</td>
+<td align="left">Pin + exclusive Lock</td>
+<td align="left">Insert a tuple or modify xmin/xmax</td>
 </tr>
 <tr>
 <td align="center"><strong>#4</strong></td>
-<td align="left">Pin + 共享 Lock</td>
-<td align="left">更新提交状态位（hint bits）</td>
+<td align="left">Pin + shared Lock</td>
+<td align="left">Update commit status bits (hint bits)</td>
 </tr>
 <tr>
 <td align="center"><strong>#5</strong></td>
-<td align="left">Pin + 排他 Lock + refcount=1</td>
-<td align="left">物理删除元组（Cleanup Lock）</td>
+<td align="left">Pin + exclusive Lock + refcount=1</td>
+<td align="left">Physically remove tuples (Cleanup Lock)</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<p>注意规则 #5：<strong>Cleanup Lock</strong> 不仅需要排他锁，还要求 <code class="notranslate">refcount=1</code>，即当前进程是唯一持有 Pin 的人。这是 VACUUM 物理删除元组时的要求。</p>
+<p>Note rule #5: the <strong>Cleanup Lock</strong> requires not only an exclusive lock but also <code class="notranslate">refcount=1</code>, meaning the current process is the <em>only</em> pin holder. This is what VACUUM needs when physically removing dead tuples.</p>
 <hr>
-<h2>三、精妙设计：两层引用计数</h2>
-<h3>3.1 问题：高并发下的性能瓶颈</h3>
-<p>如果每次 Pin/Unpin 都直接修改共享内存中的 refcount，会怎样？</p>
-<pre class="notranslate"><code class="notranslate">进程A: Pin(buf1) → refcount++   -- 需要原子操作
-进程B: Pin(buf1) → refcount++   -- 需要原子操作
-进程C: Pin(buf1) → refcount++   -- 需要原子操作
+<h2>3. An Elegant Design: Two-Level Reference Counting</h2>
+<h3>3.1 The Problem: Contention Under High Concurrency</h3>
+<p>What would happen if every Pin/Unpin modified the shared refcount in shared memory directly?</p>
+<pre class="notranslate"><code class="notranslate">Process A: Pin(buf1) → refcount++   -- requires an atomic operation
+Process B: Pin(buf1) → refcount++   -- requires an atomic operation
+Process C: Pin(buf1) → refcount++   -- requires an atomic operation
 ...
 </code></pre>
-<p>在高并发场景下，大量进程竞争同一个原子变量，性能会急剧下降。</p>
-<h3>3.2 解决方案：私有计数 + 共享计数</h3>
-<p>PostgreSQL 的解决方案非常精妙：</p>
+<p>Under heavy concurrency, many processes competing over a single atomic variable would crush performance.</p>
+<h3>3.2 The Solution: Private Count + Shared Count</h3>
+<p>PostgreSQL's solution is remarkably elegant:</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc"><img loading="lazy" width="1060" height="800" alt="Image" src="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc" style="max-width: 100%; height: auto; max-height: 800px;; aspect-ratio: 1060 / 800; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<p><strong>核心思想</strong>：</p>
+<p><strong>The core idea</strong>:</p>
 <ol>
-<li><strong>私有引用计数</strong>（PrivateRefCount）：每个进程在自己的本地内存中维护</li>
-<li><strong>共享引用计数</strong>（refcount）：在共享内存的 BufferDesc 中</li>
+<li><strong>Private reference count</strong> (PrivateRefCount): maintained by each process in its own local memory</li>
+<li><strong>Shared reference count</strong> (refcount): lives in the BufferDesc in shared memory</li>
 </ol>
-<p><strong>工作流程</strong>：</p>
+<p><strong>How it works</strong>:</p>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th align="left">操作</th>
-<th align="left">私有计数</th>
-<th align="left">共享计数</th>
-<th align="left">竞争情况</th>
+<th align="left">Operation</th>
+<th align="left">Private count</th>
+<th align="left">Shared count</th>
+<th align="left">Contention</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td align="left">首次 Pin 某 Buffer</td>
+<td align="left">First pin of a buffer</td>
 <td align="left">0 → 1</td>
 <td align="left">+1</td>
-<td align="left">需要原子操作</td>
+<td align="left">Atomic operation required</td>
 </tr>
 <tr>
-<td align="left">再次 Pin 同一 Buffer</td>
+<td align="left">Pin the same buffer again</td>
 <td align="left">+1</td>
-<td align="left">不变</td>
-<td align="left"><strong>无竞争！</strong></td>
+<td align="left">unchanged</td>
+<td align="left"><strong>No contention!</strong></td>
 </tr>
 <tr>
-<td align="left">Unpin（非最后一次）</td>
+<td align="left">Unpin (not the last one)</td>
 <td align="left">-1</td>
-<td align="left">不变</td>
-<td align="left"><strong>无竞争！</strong></td>
+<td align="left">unchanged</td>
+<td align="left"><strong>No contention!</strong></td>
 </tr>
 <tr>
-<td align="left">最后一次 Unpin</td>
+<td align="left">Final unpin</td>
 <td align="left">1 → 0</td>
 <td align="left">-1</td>
-<td align="left">需要原子操作</td>
+<td align="left">Atomic operation required</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<p><strong>性能收益</strong>：同一进程对同一 Buffer 的重复 Pin/Unpin，只有第一次和最后一次需要访问共享内存！</p>
-<h3>3.3 私有计数的存储结构</h3>
-<p>私有引用计数采用"数组 + 哈希表"的混合存储：</p>
+<p><strong>The payoff</strong>: for repeated pin/unpin of the same buffer within one process, only the first pin and the last unpin ever touch shared memory!</p>
+<h3>3.3 Storage Layout of the Private Count</h3>
+<p>The private reference count uses a hybrid "array + hash table" storage:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/backend/storage/buffer/bufmgr.c:88, 197-201</span>
 
-<span class="pl-k">#define</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span> 8  // 快速数组大小
+<span class="pl-k">#define</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span> 8  // size of the fast-path array
 
 <span class="pl-k">static</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
-<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;  <span class="pl-c">// 溢出哈希表</span></pre></div>
+<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;  <span class="pl-c">// overflow hash table</span></pre></div>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th align="left">组件</th>
-<th align="left">大小</th>
-<th align="left">查找方式</th>
-<th align="left">设计意图</th>
+<th align="left">Component</th>
+<th align="left">Size</th>
+<th align="left">Lookup</th>
+<th align="left">Design intent</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td align="left">快速数组</td>
-<td align="left">8 个条目（64 字节）</td>
-<td align="left">O(8) 顺序扫描</td>
-<td align="left">热点 Buffer 快速访问</td>
+<td align="left">Fast-path array</td>
+<td align="left">8 entries (64 bytes)</td>
+<td align="left">O(8) linear scan</td>
+<td align="left">Quick access to hot buffers</td>
 </tr>
 <tr>
-<td align="left">溢出哈希表</td>
-<td align="left">动态扩展，无上限</td>
-<td align="left">O(1) 哈希查找</td>
-<td align="left">处理大量并发 Pin</td>
+<td align="left">Overflow hash table</td>
+<td align="left">Dynamically grown, unbounded</td>
+<td align="left">O(1) hash lookup</td>
+<td align="left">Handles large numbers of pinned buffers</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<p><strong>为什么是 64 字节？</strong></p>
-<p>因为 64 字节正好等于大多数 CPU 的<strong>缓存行大小</strong>（Cache Line），可以一次性加载到 CPU 缓存中，实现极快的访问。</p>
+<p><strong>Why exactly 64 bytes?</strong></p>
+<p>Because 64 bytes matches the <strong>cache line size</strong> of most CPUs, so the whole array can be loaded into the CPU cache in one go — extremely fast to access.</p>
 <hr>
-<h2>四、Pin 操作的实现细节</h2>
-<h3>4.1 函数调用链</h3>
-<pre class="notranslate"><code class="notranslate">ReadBuffer()                           ← 简化入口 (bufmgr.c:697)
+<h2>4. Implementation Details of the Pin Operation</h2>
+<h3>4.1 The Call Chain</h3>
+<pre class="notranslate"><code class="notranslate">ReadBuffer()                           ← simplified entry (bufmgr.c:697)
     │
-    └── ReadBufferExtended()           ← 扩展入口 (bufmgr.c:744)
+    └── ReadBufferExtended()           ← extended entry (bufmgr.c:744)
             │
-            └── ReadBuffer_common()    ← 核心实现 (bufmgr.c:807)
+            └── ReadBuffer_common()    ← core implementation (bufmgr.c:807)
                     │
-                    └── BufferAlloc()  ← 分配/查找Buffer (bufmgr.c:1107)
+                    └── BufferAlloc()  ← allocate/look up buffer (bufmgr.c:1107)
                             │
-                            ├── PinBuffer()        ← Buffer命中时 (bufmgr.c:1692)
+                            ├── PinBuffer()        ← on buffer hit (bufmgr.c:1692)
                             │
-                            └── PinBuffer_Locked() ← 新分配Buffer时 (bufmgr.c:1795)
+                            └── PinBuffer_Locked() ← on newly allocated buffer (bufmgr.c:1795)
 </code></pre>
-<h3>调用链详解</h3>
+<h3>The Call Chain Explained</h3>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>函数</th>
-<th>位置</th>
-<th>职责</th>
+<th>Function</th>
+<th>Location</th>
+<th>Responsibility</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code class="notranslate">ReadBuffer</code></td>
 <td>bufmgr.c:697</td>
-<td>简化接口，读取MAIN_FORKNUM</td>
+<td>Simplified API, reads MAIN_FORKNUM</td>
 </tr>
 <tr>
 <td><code class="notranslate">ReadBufferExtended</code></td>
 <td>bufmgr.c:744</td>
-<td>支持指定fork和读取模式</td>
+<td>Supports specifying fork and read mode</td>
 </tr>
 <tr>
 <td><code class="notranslate">ReadBuffer_common</code></td>
 <td>bufmgr.c:807</td>
-<td>统一处理本地/共享buffer</td>
+<td>Unified handling of local/shared buffers</td>
 </tr>
 <tr>
 <td><code class="notranslate">BufferAlloc</code></td>
 <td>bufmgr.c:1107</td>
-<td>共享buffer的分配与查找</td>
+<td>Allocation and lookup of shared buffers</td>
 </tr>
 <tr>
 <td><code class="notranslate">PinBuffer</code></td>
 <td>bufmgr.c:1692</td>
-<td>无锁pin操作（CAS）</td>
+<td>Lock-free pin (CAS)</td>
 </tr>
 <tr>
 <td><code class="notranslate">PinBuffer_Locked</code></td>
 <td>bufmgr.c:1795</td>
-<td>持有spinlock时的pin</td>
+<td>Pin while holding the spinlock</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<h3>4.2 Pin机制的核心设计</h3>
-<p>PostgreSQL采用<strong>两层引用计数</strong>机制来实现Buffer Pin：</p>
+<h3>4.2 The Core Design of Pinning</h3>
+<p>PostgreSQL uses a <strong>two-level reference counting</strong> scheme to implement buffer pins:</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66"><img loading="lazy" width="1014" height="787" alt="Image" src="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66" style="max-width: 100%; height: auto; max-height: 787px;; aspect-ratio: 1014 / 787; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<h4>设计优势</h4>
+<h4>Design Advantages</h4>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>层级</th>
-<th>存储位置</th>
-<th>作用</th>
-<th>性能特点</th>
+<th>Level</th>
+<th>Storage</th>
+<th>Purpose</th>
+<th>Performance</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>私有引用计数</strong></td>
-<td>Backend本地内存</td>
-<td>记录当前进程对buffer的pin次数</td>
-<td>无锁访问，极快</td>
+<td><strong>Private reference count</strong></td>
+<td>Backend-local memory</td>
+<td>Records how many times <em>this</em> process pinned the buffer</td>
+<td>Lock-free access, extremely fast</td>
 </tr>
 <tr>
-<td><strong>共享引用计数</strong></td>
+<td><strong>Shared reference count</strong></td>
 <td><code class="notranslate">BufferDesc-&gt;state</code></td>
-<td>记录所有进程对buffer的总pin数</td>
-<td>原子操作，有竞争</td>
+<td>Total pin count of the buffer across all processes</td>
+<td>Atomic operations, contended</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<p><strong>设计意图</strong>：同一进程多次pin同一buffer时，只需修改私有计数，避免频繁竞争共享状态。仅在首次pin和最后unpin时才更新共享引用计数。</p>
-<h3>4.3 核心数据结构</h3>
-<h4>4.3.1 私有引用计数条目</h4>
+<p><strong>Design intent</strong>: when the same process pins the same buffer repeatedly, only the private count is touched — no contention on the shared state. The shared refcount is updated only on the first pin and the final unpin.</p>
+<h3>4.3 Key Data Structures</h3>
+<h4>4.3.1 The Private Reference Count Entry</h4>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:81-85</span>
 <span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span>
 {
-    <span class="pl-smi">Buffer</span>      <span class="pl-c1">buffer</span>;     <span class="pl-c">// Buffer编号（1-based）</span>
-    <span class="pl-smi">int32</span>       <span class="pl-c1">refcount</span>;   <span class="pl-c">// 本进程的pin次数</span>
+    <span class="pl-smi">Buffer</span>      <span class="pl-c1">buffer</span>;     <span class="pl-c">// buffer number (1-based)</span>
+    <span class="pl-smi">int32</span>       <span class="pl-c1">refcount</span>;   <span class="pl-c">// pin count of this process</span>
 } <span class="pl-smi">PrivateRefCountEntry</span>;</pre></div>
-<h4>4.3.2 私有引用计数存储</h4>
+<h4>4.3.2 Private Reference Count Storage</h4>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:197-201</span>
 
-<span class="pl-c">// 快速数组：存放最常用的8个buffer</span>
+<span class="pl-c">// Fast-path array: holds the 8 most-used buffers</span>
 <span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
 
-<span class="pl-c">// 溢出哈希表：超过8个时使用</span>
+<span class="pl-c">// Overflow hash table: used beyond 8 buffers</span>
 <span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;
 
-<span class="pl-c">// 溢出计数</span>
+<span class="pl-c">// Overflow counter</span>
 <span class="pl-k">static</span> <span class="pl-smi">int32</span> <span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
 
-<span class="pl-c">// 时钟指针：用于选择要移入哈希表的数组项</span>
+<span class="pl-c">// Clock hand: selects which array entry to move to the hash table</span>
 <span class="pl-k">static</span> <span class="pl-smi">uint32</span> <span class="pl-s1">PrivateRefCountClock</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
 
-<span class="pl-c">// 预留的空闲条目</span>
+<span class="pl-c">// A reserved free entry</span>
 <span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;</pre></div>
-<h3>4.4 Pin操作完整流程图</h3>
+<h3>4.4 Complete Pin Flow Diagrams</h3>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746"><img loading="lazy" width="942" height="901" alt="Image" src="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746" style="max-width: 100%; height: auto; max-height: 901px;; aspect-ratio: 942 / 901; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849"><img loading="lazy" width="947" height="216" alt="Image" src="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849" style="max-width: 100%; height: auto; max-height: 216px;; aspect-ratio: 947 / 216; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<h4>4.4.1 PinBuffer() 详解</h4>
-<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1692-1771</code></p>
-<p>这是<strong>不持有spinlock</strong>时的pin操作，使用CAS原子操作实现无锁更新：</p>
+<h4>4.4.1 PinBuffer() in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1692-1771</code></p>
+<p>This is the pin path used when <strong>not holding the spinlock</strong>. It updates state with a lock-free CAS loop:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">bool</span>
 <span class="pl-en">PinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>)
 {
@@ -586,110 +582,110 @@ for a different page at any instant, so touching it is unsafe.
     <span class="pl-smi">bool</span>        <span class="pl-s1">result</span>;
     <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
 
-    <span class="pl-c">// 步骤1: 查找私有引用计数条目</span>
+    <span class="pl-c">// Step 1: look up the private reference count entry</span>
     <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, true);
 
     <span class="pl-k">if</span> (<span class="pl-s1">ref</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
     {
         <span class="pl-c">// ═══════════════════════════════════════════════════</span>
-        <span class="pl-c">// 情况A: 首次pin此buffer，需要更新共享引用计数</span>
+        <span class="pl-c">// Case A: first pin of this buffer, must update the shared count</span>
         <span class="pl-c">// ═══════════════════════════════════════════════════</span>
         <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
         <span class="pl-smi">uint32</span>      <span class="pl-s1">old_buf_state</span>;
 
-        <span class="pl-c">// 步骤2: 预留私有引用计数空间</span>
+        <span class="pl-c">// Step 2: reserve space for a private refcount entry</span>
         <span class="pl-en">ReservePrivateRefCountEntry</span>();
 
-        <span class="pl-c">// 步骤3: 创建新的私有引用计数条目</span>
+        <span class="pl-c">// Step 3: create a new private refcount entry</span>
         <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
 
-        <span class="pl-c">// 步骤4: CAS循环更新共享引用计数</span>
+        <span class="pl-c">// Step 4: CAS loop to update the shared refcount</span>
         <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
         <span class="pl-k">for</span> (;;)
         {
-            <span class="pl-c">// 如果buffer被锁定，等待解锁</span>
+            <span class="pl-c">// If the buffer header is locked, wait for it</span>
             <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
                 <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
 
             <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
 
-            <span class="pl-c">// 增加共享引用计数</span>
+            <span class="pl-c">// Increase the shared refcount</span>
             <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
 
-            <span class="pl-c">// 更新usage_count（用于替换算法）</span>
+            <span class="pl-c">// Update usage_count (for the replacement algorithm)</span>
             <span class="pl-k">if</span> (<span class="pl-s1">strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
             {
-                <span class="pl-c">// 默认策略：增加usage_count直到最大值</span>
+                <span class="pl-c">// Default strategy: raise usage_count up to the max</span>
                 <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>)
                     <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
             }
             <span class="pl-k">else</span>
             {
-                <span class="pl-c">// Ring buffer策略：只设置为1，避免驱逐其他buffer</span>
+                <span class="pl-c">// Ring buffer strategy: only set it to 1, avoid evicting others</span>
                 <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
                     <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
             }
 
-            <span class="pl-c">// CAS原子更新</span>
+            <span class="pl-c">// Atomic CAS update</span>
             <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
                                                <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
             {
                 <span class="pl-s1">result</span> <span class="pl-c1">=</span> (<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_VALID</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
 
-                <span class="pl-c">// Valgrind: 标记buffer内存为可访问</span>
+                <span class="pl-c">// Valgrind: mark buffer memory as accessible</span>
                 <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
                 <span class="pl-k">break</span>;
             }
-            <span class="pl-c">// CAS失败，old_buf_state已被更新为当前值，继续循环</span>
+            <span class="pl-c">// CAS failed; old_buf_state now holds the current value, retry</span>
         }
     }
     <span class="pl-k">else</span>
     {
         <span class="pl-c">// ═══════════════════════════════════════════════════</span>
-        <span class="pl-c">// 情况B: 已经pin过，无需修改共享状态</span>
+        <span class="pl-c">// Case B: already pinned, no shared state change needed</span>
         <span class="pl-c">// ═══════════════════════════════════════════════════</span>
         <span class="pl-s1">result</span> <span class="pl-c1">=</span> true;
     }
 
-    <span class="pl-c">// 步骤5: 增加私有引用计数</span>
+    <span class="pl-c">// Step 5: increase the private refcount</span>
     <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
     <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
 
-    <span class="pl-c">// 步骤6: 记录到ResourceOwner（用于事务结束时自动释放）</span>
+    <span class="pl-c">// Step 6: record in ResourceOwner (auto-release at transaction end)</span>
     <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
 
     <span class="pl-k">return</span> <span class="pl-s1">result</span>;
 }</pre></div>
-<h5>关键技术点</h5>
+<h5>Key Techniques</h5>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>技术</th>
-<th>说明</th>
+<th>Technique</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>CAS循环</strong></td>
-<td>使用<code class="notranslate">pg_atomic_compare_exchange_u32</code>实现乐观锁，避免spinlock开销</td>
+<td><strong>CAS loop</strong></td>
+<td><code class="notranslate">pg_atomic_compare_exchange_u32</code> implements optimistic locking, avoiding spinlock overhead</td>
 </tr>
 <tr>
-<td><strong>等待解锁</strong></td>
-<td>若<code class="notranslate">BM_LOCKED</code>标志置位，调用<code class="notranslate">WaitBufHdrUnlocked</code>等待</td>
+<td><strong>Waiting for unlock</strong></td>
+<td>If <code class="notranslate">BM_LOCKED</code> is set, call <code class="notranslate">WaitBufHdrUnlocked</code></td>
 </tr>
 <tr>
 <td><strong>usage_count</strong></td>
-<td>默认策略下递增至最大值5，影响Clock-Sweep替换算法</td>
+<td>Under the default strategy it grows up to 5, steering the Clock-Sweep replacement algorithm</td>
 </tr>
 <tr>
-<td><strong>Ring策略</strong></td>
-<td>批量扫描时使用，usage_count只设为1，减少对缓存的影响</td>
+<td><strong>Ring strategy</strong></td>
+<td>Used for bulk scans; usage_count is only set to 1 to reduce cache pollution</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<h4>4.4.2 PinBuffer_Locked() 详解</h4>
-<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1795-1829</code></p>
-<p>这是<strong>持有spinlock</strong>时的pin操作，用于新分配的victim buffer：</p>
+<h4>4.4.2 PinBuffer_Locked() in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1795-1829</code></p>
+<p>This is the pin path used while <strong>holding the spinlock</strong>, for a freshly allocated victim buffer:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
 <span class="pl-en">PinBuffer_Locked</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>)
 {
@@ -697,89 +693,89 @@ for a different page at any instant, so touching it is unsafe.
     <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
     <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
 
-    <span class="pl-c">// 前置条件检查：不应有预存的私有引用</span>
+    <span class="pl-c">// Precondition: no pre-existing private refcount for this buffer</span>
     <span class="pl-en">Assert</span>(<span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>), false) <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>);
 
-    <span class="pl-c">// Valgrind: 标记buffer内存为可访问</span>
+    <span class="pl-c">// Valgrind: mark buffer memory as accessible</span>
     <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 步骤1: 读取state并增加引用计数</span>
-    <span class="pl-c">// 因为持有spinlock，可以直接修改（无需CAS）</span>
+    <span class="pl-c">// Step 1: read state and bump the refcount</span>
+    <span class="pl-c">// We hold the spinlock, so a plain modification is safe (no CAS)</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
     <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
-    <span class="pl-en">Assert</span>(<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>);  <span class="pl-c">// 确认持有spinlock</span>
+    <span class="pl-en">Assert</span>(<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>);  <span class="pl-c">// confirm spinlock is held</span>
     <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 步骤2: 释放spinlock（写入新状态并清除BM_LOCKED）</span>
+    <span class="pl-c">// Step 2: release the spinlock (write new state, clear BM_LOCKED)</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
     <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">buf_state</span>);
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 步骤3: 创建私有引用计数条目（spinlock已释放）</span>
+    <span class="pl-c">// Step 3: create the private refcount entry (spinlock released)</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
     <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
     <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
     <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 步骤4: 记录到ResourceOwner</span>
+    <span class="pl-c">// Step 4: record in ResourceOwner</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
     <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
 }</pre></div>
-<h5>与PinBuffer的区别</h5>
+<h5>Differences from PinBuffer</h5>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>特性</th>
+<th>Property</th>
 <th>PinBuffer</th>
 <th>PinBuffer_Locked</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>调用场景</strong></td>
-<td>Buffer已在缓存中</td>
-<td>新分配的victim buffer</td>
+<td><strong>When called</strong></td>
+<td>Buffer already in cache</td>
+<td>Freshly allocated victim buffer</td>
 </tr>
 <tr>
-<td><strong>锁状态</strong></td>
-<td>不持有spinlock</td>
-<td>持有spinlock</td>
+<td><strong>Lock state</strong></td>
+<td>Not holding spinlock</td>
+<td>Holding spinlock</td>
 </tr>
 <tr>
-<td><strong>更新方式</strong></td>
-<td>CAS循环</td>
-<td>直接写入</td>
+<td><strong>Update method</strong></td>
+<td>CAS loop</td>
+<td>Direct write</td>
 </tr>
 <tr>
 <td><strong>usage_count</strong></td>
-<td>可能更新</td>
-<td>不更新</td>
+<td>May be updated</td>
+<td>Not updated</td>
 </tr>
 <tr>
-<td><strong>预存引用检查</strong></td>
-<td>允许有预存引用</td>
-<td>不允许</td>
+<td><strong>Pre-existing refcount</strong></td>
+<td>Allowed</td>
+<td>Not allowed</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<h3>4.5 私有引用计数管理</h3>
-<h4>4.5.1 存储策略</h4>
-<p>采用<strong>数组+哈希表</strong>的混合存储，优化常见场景：</p>
+<h3>4.5 Managing the Private Reference Count</h3>
+<h4>4.5.1 Storage Strategy</h4>
+<p>A hybrid <strong>array + hash table</strong> storage optimizes for the common case:</p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d"><img loading="lazy" width="1015" height="818" alt="Image" src="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d" style="max-width: 100%; height: auto; max-height: 818px;; aspect-ratio: 1015 / 818; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
 <p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6"><img loading="lazy" width="1017" height="244" alt="Image" src="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6" style="max-width: 100%; height: auto; max-height: 244px;; aspect-ratio: 1017 / 244; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
-<h4>4.5.2 核心函数</h4>
+<h4>4.5.2 Core Functions</h4>
 <h5>ReservePrivateRefCountEntry() - <code class="notranslate">bufmgr.c:214-275</code></h5>
-<p>预留一个空闲的引用计数条目：</p>
+<p>Reserves a free refcount entry:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span> <span class="pl-en">ReservePrivateRefCountEntry</span>(<span class="pl-smi">void</span>)
 {
-    <span class="pl-c">// 如果已有预留，直接返回</span>
+    <span class="pl-c">// Already reserved? Return directly</span>
     <span class="pl-k">if</span> (<span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
         <span class="pl-k">return</span>;
 
-    <span class="pl-c">// 首先在数组中查找空闲槽位</span>
+    <span class="pl-c">// First, look for a free slot in the array</span>
     <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
     {
         <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">InvalidBuffer</span>)
@@ -789,45 +785,46 @@ for a different page at any instant, so touching it is unsafe.
         }
     }
 
-    <span class="pl-c">// 数组已满，使用时钟算法选择victim移入哈希表</span>
+    <span class="pl-c">// Array is full: use the clock algorithm to pick a victim to move to the hash table</span>
     <span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span>
         <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">PrivateRefCountClock</span><span class="pl-c1">++</span> % <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
 
-    <span class="pl-c">// 将victim移入哈希表</span>
+    <span class="pl-c">// Move the victim into the hash table</span>
     <span class="pl-s1">hashent</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>,
                           <span class="pl-c1">&amp;</span>(<span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span>),
                           <span class="pl-c1">HASH_ENTER</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
     <span class="pl-s1">hashent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
 
-    <span class="pl-c">// 清空数组槽位</span>
+    <span class="pl-c">// Clear the array slot</span>
     <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">InvalidBuffer</span>;
     <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
 
     <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">++</span>;
 }</pre></div>
 <h5>GetPrivateRefCountEntry() - <code class="notranslate">bufmgr.c:306-379</code></h5>
-<p>查找指定buffer的引用计数条目：</p>
+<p>Looks up the refcount entry for a given buffer:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span>
 <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-smi">Buffer</span> <span class="pl-s1">buffer</span>, <span class="pl-smi">bool</span> <span class="pl-s1">do_move</span>)
 {
-    <span class="pl-c">// 1. 先在数组中查找（O(8)）</span>
+    <span class="pl-c">// 1. Search the array first (O(8))</span>
     <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
     {
         <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">buffer</span>)
             <span class="pl-k">return</span> <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>];
     }
 
-    <span class="pl-c">// 2. 如果没有溢出，直接返回NULL</span>
+    <span class="pl-c">// 2. If nothing ever overflowed, it cannot be in the hash table</span>
     <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
         <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
 
-    <span class="pl-c">// 3. 在哈希表中查找</span>
+    <span class="pl-c">// 3. Look in the hash table</span>
     <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_FIND</span>, <span class="pl-c1">NULL</span>);
 
     <span class="pl-k">if</span> (<span class="pl-s1">res</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
         <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
 
-    <span class="pl-c">// 4. 如果do_move=true，将条目移回数组以加速后续访问</span>
+    <span class="pl-c">// 4. If do_move=true, move the entry back into the array to speed up</span>
+    <span class="pl-c">//    subsequent accesses</span>
     <span class="pl-k">if</span> (<span class="pl-s1">do_move</span>)
     {
         <span class="pl-en">ReservePrivateRefCountEntry</span>();
@@ -835,7 +832,7 @@ for a different page at any instant, so touching it is unsafe.
         <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">buffer</span>;
         <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">res</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
 
-        <span class="pl-c">// 从哈希表删除</span>
+        <span class="pl-c">// Remove from the hash table</span>
         <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_REMOVE</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
         <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">--</span>;
 
@@ -844,95 +841,95 @@ for a different page at any instant, so touching it is unsafe.
 
     <span class="pl-k">return</span> <span class="pl-s1">res</span>;
 }</pre></div>
-<h4>4.5.3 BufferAlloc中的Pin调用</h4>
-<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1107-1405</code></p>
-<p><code class="notranslate">BufferAlloc</code>是<code class="notranslate">ReadBuffer_common</code>的子函数，负责在共享buffer池中分配或查找buffer：</p>
+<h4>4.5.3 Pin Calls Inside BufferAlloc</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1107-1405</code></p>
+<p><code class="notranslate">BufferAlloc</code> is the sub-function of <code class="notranslate">ReadBuffer_common</code> that allocates or finds a buffer in the shared pool:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span>
 <span class="pl-en">BufferAlloc</span>(<span class="pl-smi">SMgrRelation</span> <span class="pl-s1">smgr</span>, <span class="pl-smi">char</span> <span class="pl-s1">relpersistence</span>, <span class="pl-smi">ForkNumber</span> <span class="pl-s1">forkNum</span>,
             <span class="pl-smi">BlockNumber</span> <span class="pl-s1">blockNum</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>, <span class="pl-smi">bool</span> <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span>)
 {
-    <span class="pl-c">// 创建BufferTag</span>
+    <span class="pl-c">// Build the BufferTag</span>
     <span class="pl-en">INIT_BUFFERTAG</span>(<span class="pl-s1">newTag</span>, <span class="pl-s1">smgr</span><span class="pl-c1">-&gt;</span><span class="pl-c1">smgr_rnode</span>.<span class="pl-c1">node</span>, <span class="pl-s1">forkNum</span>, <span class="pl-s1">blockNum</span>);
     <span class="pl-s1">newHash</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableHashCode</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>);
     <span class="pl-s1">newPartitionLock</span> <span class="pl-c1">=</span> <span class="pl-en">BufMappingPartitionLock</span>(<span class="pl-s1">newHash</span>);
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 场景1: 在哈希表中查找buffer</span>
+    <span class="pl-c">// Case 1: look up the buffer in the hash table</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
     <span class="pl-en">LWLockAcquire</span>(<span class="pl-s1">newPartitionLock</span>, <span class="pl-c1">LW_SHARED</span>);
     <span class="pl-s1">buf_id</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableLookup</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>, <span class="pl-s1">newHash</span>);
 
     <span class="pl-k">if</span> (<span class="pl-s1">buf_id</span> &gt;= <span class="pl-c1">0</span>)
     {
-        <span class="pl-c">// Buffer命中！</span>
+        <span class="pl-c">// Buffer hit!</span>
         <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">GetBufferDescriptor</span>(<span class="pl-s1">buf_id</span>);
 
-        <span class="pl-c">// 调用 PinBuffer (不持有spinlock)</span>
-        <span class="pl-s1">valid</span> <span class="pl-c1">=</span> <span class="pl-en">PinBuffer</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">strategy</span>);        <span class="pl-c">// ← Pin操作</span>
+        <span class="pl-c">// Call PinBuffer (not holding the spinlock)</span>
+        <span class="pl-s1">valid</span> <span class="pl-c1">=</span> <span class="pl-en">PinBuffer</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">strategy</span>);        <span class="pl-c">// ← the pin</span>
 
         <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
         <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span> <span class="pl-c1">=</span> true;
 
-        <span class="pl-c">// 处理BM_VALID检查...</span>
+        <span class="pl-c">// Handle the BM_VALID check...</span>
         <span class="pl-k">return</span> <span class="pl-s1">buf</span>;
     }
 
     <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
 
     <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
-    <span class="pl-c">// 场景2: Buffer未命中，需要分配新buffer</span>
+    <span class="pl-c">// Case 2: buffer miss, need to allocate a new buffer</span>
     <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
     <span class="pl-k">for</span> (;;)
     {
-        <span class="pl-c">// 预留私有引用计数空间</span>
+        <span class="pl-c">// Reserve space for a private refcount entry</span>
         <span class="pl-en">ReservePrivateRefCountEntry</span>();
 
-        <span class="pl-c">// 获取victim buffer（带spinlock返回）</span>
+        <span class="pl-c">// Get a victim buffer (returned holding the spinlock)</span>
         <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">StrategyGetBuffer</span>(<span class="pl-s1">strategy</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buf_state</span>);
 
-        <span class="pl-c">// 调用 PinBuffer_Locked (持有spinlock)</span>
-        <span class="pl-en">PinBuffer_Locked</span>(<span class="pl-s1">buf</span>);                   <span class="pl-c">// ← Pin操作</span>
+        <span class="pl-c">// Call PinBuffer_Locked (holding the spinlock)</span>
+        <span class="pl-en">PinBuffer_Locked</span>(<span class="pl-s1">buf</span>);                   <span class="pl-c">// ← the pin</span>
 
-        <span class="pl-c">// 处理脏页刷新、重新验证等...</span>
+        <span class="pl-c">// Handle dirty-page writeout, re-validation, etc...</span>
 
-        <span class="pl-c">// 如果成功，返回buffer</span>
-        <span class="pl-c">// 否则UnpinBuffer并继续循环</span>
+        <span class="pl-c">// On success, return the buffer</span>
+        <span class="pl-c">// Otherwise UnpinBuffer and retry</span>
     }
 }</pre></div>
-<h4>4.5.4. UnpinBuffer详解</h4>
-<p><strong>源码位置</strong>: <code class="notranslate">bufmgr.c:1840-1923</code></p>
-<p>与Pin相对的Unpin操作：</p>
+<h4>4.5.4 UnpinBuffer in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1840-1923</code></p>
+<p>The counterpart of pin — unpin:</p>
 <div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
 <span class="pl-en">UnpinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">bool</span> <span class="pl-s1">fixOwner</span>)
 {
     <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
     <span class="pl-smi">Buffer</span> <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
 
-    <span class="pl-c">// 获取私有引用计数条目</span>
+    <span class="pl-c">// Get the private refcount entry</span>
     <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, false);
     <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>);
 
-    <span class="pl-c">// 从ResourceOwner移除</span>
+    <span class="pl-c">// Remove from the ResourceOwner</span>
     <span class="pl-k">if</span> (<span class="pl-s1">fixOwner</span>)
         <span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
 
-    <span class="pl-c">// 减少私有引用计数</span>
+    <span class="pl-c">// Decrease the private refcount</span>
     <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
     <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">--</span>;
 
     <span class="pl-k">if</span> (<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
     {
         <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
-        <span class="pl-c">// 最后一个私有引用，需要更新共享引用计数</span>
+        <span class="pl-c">// Last private reference: must update the shared refcount</span>
         <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
 
-        <span class="pl-c">// Valgrind: 标记buffer为不可访问</span>
+        <span class="pl-c">// Valgrind: mark the buffer as inaccessible</span>
         <span class="pl-en">VALGRIND_MAKE_MEM_NOACCESS</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
 
-        <span class="pl-c">// 确认没有持有content lock</span>
+        <span class="pl-c">// Confirm we do not hold the content lock</span>
         <span class="pl-en">Assert</span>(!<span class="pl-en">LWLockHeldByMe</span>(<span class="pl-en">BufferDescriptorGetContentLock</span>(<span class="pl-s1">buf</span>)));
 
-        <span class="pl-c">// CAS循环减少共享引用计数</span>
+        <span class="pl-c">// CAS loop to decrease the shared refcount</span>
         <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
         <span class="pl-k">for</span> (;;)
         {
@@ -940,12 +937,12 @@ for a different page at any instant, so touching it is unsafe.
                 <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
 
             <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
-            <span class="pl-s1">buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;  <span class="pl-c">// 减少引用计数</span>
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;  <span class="pl-c">// decrease the refcount</span>
 
             <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
                                                <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
             {
-                <span class="pl-c">// 如果有等待者且引用计数为0，唤醒它们</span>
+                <span class="pl-c">// If there are waiters and refcount hit 0, wake them up</span>
                 <span class="pl-k">if</span> ((<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_PIN_COUNT_WAITER</span>) <span class="pl-c1">&amp;&amp;</span>
                     <span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
                     <span class="pl-c">/* ... wake up waiters ... */</span>
@@ -953,88 +950,89 @@ for a different page at any instant, so touching it is unsafe.
             }
         }
 
-        <span class="pl-c">// 释放私有引用计数条目</span>
+        <span class="pl-c">// Release the private refcount entry</span>
         <span class="pl-en">ForgetPrivateRefCountEntry</span>(<span class="pl-s1">ref</span>);
     }
 }</pre></div>
-<h4>4.5.5. ResourceOwner集成</h4>
-<p>Pin操作与PostgreSQL的资源管理系统紧密集成：</p>
-<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// 在ReadBuffer_common开始时</span>
+<h4>4.5.5 ResourceOwner Integration</h4>
+<p>The pin operation integrates tightly with PostgreSQL's resource tracking system:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// At the start of ReadBuffer_common</span>
 <span class="pl-en">ResourceOwnerEnlargeBuffers</span>(<span class="pl-s1">CurrentResourceOwner</span>);  <span class="pl-c">// bufmgr.c:820</span>
 
-<span class="pl-c">// 在PinBuffer/PinBuffer_Locked结束时</span>
+<span class="pl-c">// At the end of PinBuffer/PinBuffer_Locked</span>
 <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1769, 1828</span>
 
-<span class="pl-c">// 在UnpinBuffer时</span>
+<span class="pl-c">// In UnpinBuffer</span>
 <span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1850</span></pre></div>
-<p><strong>设计目的</strong>：</p>
+<p><strong>Why bother?</strong></p>
 <ol>
-<li><strong>自动清理</strong>：事务结束时自动释放所有pinned buffers</li>
-<li><strong>泄漏检测</strong>：检查是否有buffer在不应该的时候仍被pin住</li>
-<li><strong>资源追踪</strong>：便于调试和监控</li>
+<li><strong>Automatic cleanup</strong>: all pinned buffers are released when the transaction ends</li>
+<li><strong>Leak detection</strong>: detects buffers that remain pinned when they shouldn't</li>
+<li><strong>Resource tracking</strong>: easier debugging and monitoring</li>
 </ol>
-<h2>五. 总结</h2>
-<h3>Pin操作的核心特性</h3>
+<h2>5. Summary</h2>
+<h3>Core Properties of the Pin Operation</h3>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>特性</th>
-<th>实现方式</th>
-<th>优势</th>
+<th>Property</th>
+<th>Implementation</th>
+<th>Benefit</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>无锁更新</strong></td>
-<td>CAS原子操作</td>
-<td>避免spinlock开销，提高并发性</td>
+<td><strong>Lock-free updates</strong></td>
+<td>CAS atomic operations</td>
+<td>Avoids spinlock overhead, better concurrency</td>
 </tr>
 <tr>
-<td><strong>两层引用计数</strong></td>
-<td>私有+共享</td>
-<td>减少竞争，同进程重复pin几乎无开销</td>
+<td><strong>Two-level refcount</strong></td>
+<td>Private + shared</td>
+<td>Minimal contention; repeated pins within a process are nearly free</td>
 </tr>
 <tr>
-<td><strong>混合存储</strong></td>
-<td>数组(≤8)+哈希表</td>
-<td>常见场景O(1)访问，支持大量pin</td>
+<td><strong>Hybrid storage</strong></td>
+<td>Array (≤8) + hash table</td>
+<td>O(1) access in the common case, scales to many pins</td>
 </tr>
 <tr>
-<td><strong>资源追踪</strong></td>
+<td><strong>Resource tracking</strong></td>
 <td>ResourceOwner</td>
-<td>自动清理，防止泄漏</td>
+<td>Automatic cleanup, prevents leaks</td>
 </tr>
 <tr>
-<td><strong>替换友好</strong></td>
+<td><strong>Eviction-friendly</strong></td>
 <td>usage_count</td>
-<td>支持Clock-Sweep算法</td>
+<td>Feeds the Clock-Sweep algorithm</td>
 </tr>
 <tr>
-<td><strong>策略感知</strong></td>
+<td><strong>Strategy-aware</strong></td>
 <td>BufferAccessStrategy</td>
-<td>批量操作减少缓存污染</td>
+<td>Bulk operations limit cache pollution</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
-<h3>性能考量</h3>
+<h3>Performance Considerations</h3>
 <ul>
-<li><strong>热点buffer</strong>：同进程重复访问只修改私有计数，无竞争</li>
-<li><strong>CAS失败重试</strong>：高并发时可能多次重试，但比spinlock更高效</li>
-<li><strong>内存布局</strong>：PrivateRefCountArray大小64字节，适配CPU缓存行</li>
+<li><strong>Hot buffers</strong>: repeated access within one process only touches the private count — zero contention</li>
+<li><strong>CAS retries</strong>: under extreme contention the CAS loop may retry several times, but it is still cheaper than a spinlock</li>
+<li><strong>Memory layout</strong>: PrivateRefCountArray is 64 bytes — exactly one CPU cache line</li>
 </ul>
-<h2>参考资料：</h2>
+<h2>References</h2>
 <ul>
-<li><a href="https://www.interdb.jp/pg/pgsql08/index.html" rel="nofollow">interdb</a></li>
-<li>PostgreSQL 14.4 源码:  src\backend\storage\buffer\bufmgr.c</li>
+<li><a href="https://www.interdb.jp/pg/pgsql08/index.html" rel="nofollow">interdb — The Internals of PostgreSQL, Chapter 8</a></li>
+<li>PostgreSQL 14.4 source: <code class="notranslate">src/backend/storage/buffer/bufmgr.c</code></li>
 <li><code class="notranslate">src/backend/storage/buffer/README</code></li>
-</ul></div>
+</ul>
+<p><em>This is the English edition of <a href="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html" rel="nofollow">深入理解PostgreSQL Buffer Pin机制</a>.</em></p></div>
 <div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
 
 <div id="relatedPosts" style="clear:both;margin-top:48px;border-top:1px solid var(--color-border-default);padding-top:20px;">
 <h3 style="margin-bottom:12px;">相关文章</h3>
 <ul style="list-style:none;padding:0;">
 
-<li style="margin-bottom:8px;"><a href="/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html">Deep Dive into PostgreSQL Buffer Pin Mechanism</a> <span style="color:var(--color-fg-muted);font-size:small;">2026-08-15</span></li>
+<li style="margin-bottom:8px;"><a href="/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html">深入理解PostgreSQL_Buffer_Pin机制</a> <span style="color:var(--color-fg-muted);font-size:small;">2026-01-11</span></li>
 
 <li style="margin-bottom:8px;"><a href="/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html">深入理解 PostgreSQL Memory Context (2)</a> <span style="color:var(--color-fg-muted);font-size:small;">2026-04-20</span></li>
 
@@ -1050,16 +1048,11 @@ for a different page at any instant, so touching it is unsafe.
 
 <nav class="postNav">
     
-    <a href="/post/shen-ru-tan-suo-PostgreSQL-18-de-xin-te-xing.html">
+    <a href="/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html">
         <span class="nav-label">&larr; 上一篇</span>
-        <span class="nav-title">深入探索 PostgreSQL 18 的新特性</span>
+        <span class="nav-title">深入理解 PostgreSQL Memory Context (2)</span>
     </a>
     
-    
-    <a href="/post/shen-ru-li-jie-postgresql-buffer-usage_count.html" class="nav-next">
-        <span class="nav-label">下一篇 &rarr;</span>
-        <span class="nav-title">深入理解 postgresql buffer usage_count</span>
-    </a>
     
 </nav>
 

@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PG Internal</title><link>https://pg-internal.com</link><description>道阻且长,行则将至</description><copyright>PG Internal</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://pg-internal.com/avatar.jpg</url><title>avatar</title><link>https://pg-internal.com</link></image><lastBuildDate>Sat, 15 Aug 2026 07:07:50 +0000</lastBuildDate><managingEditor>PG Internal</managingEditor><ttl>60</ttl><webMaster>PG Internal</webMaster><item><title>深入理解 PostgreSQL Memory Context (2)</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html</link><description>七、超大内存分配策略
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PG Internal</title><link>https://pg-internal.com</link><description>道阻且长,行则将至</description><copyright>PG Internal</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://pg-internal.com/avatar.jpg</url><title>avatar</title><link>https://pg-internal.com</link></image><lastBuildDate>Sat, 15 Aug 2026 07:15:50 +0000</lastBuildDate><managingEditor>PG Internal</managingEditor><ttl>60</ttl><webMaster>PG Internal</webMaster><item><title>Deep Dive into PostgreSQL Buffer Pin Mechanism</title><link>https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html</link><description>1. The Essence of a Buffer Pin: Three Words — 'Don't Touch It'&#13;
+&#13;
+1.1 The Core Definition&#13;
+&#13;
+The meaning of **Pin** is r...</description><guid isPermaLink="true">https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html</guid><pubDate>Sat, 15 Aug 2026 06:52:30 +0000</pubDate></item><item><title>深入理解 PostgreSQL Memory Context (2)</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html</link><description>七、超大内存分配策略
 
 7.1 要点
 
