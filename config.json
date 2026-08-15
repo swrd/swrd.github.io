@@ -4,7 +4,7 @@
     "description": "PostgreSQL 数据库技术博客，专注于源码分析、性能优化和运维实战",
     "keywords": "PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化",
     "homeUrl":"https://pg-internal.com",
-    "avatarUrl":"https://avatars.githubusercontent.com/u/5057571?s=96&v=4",
+    "avatarUrl":"https://pg-internal.com/avatar.svg",
     "faviconUrl":"/PostgreSQL_logo.3colors.svg",
     "singlePage":["link","about"],
     "email":"1367007812@qq.com",
@@ -17,8 +17,8 @@
     "bottomText":"❤️ 转载文章请注明出处，谢谢！❤️",
     "iconList":{},
     "exlink":{},
-    "primerCSS":"<link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />",
-    "script":"<script src='/assets/GmeekTocBot.js'></script>",
-    "allHead":"<script src='/assets/GmeekVercount.js'></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{\"token\": \"0b6ae8ab0b62429282f90823ed2927a0\"}'></script><!-- End Cloudflare Web Analytics -->",
+    "primerCSS":"<link href='/assets/primer.css' rel='stylesheet' />",
+    "script":"<script src='/assets/GmeekTocBot.js' defer></script>",
+    "allHead":"<script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{\"token\": \"0b6ae8ab0b62429282f90823ed2927a0\"}'></script><!-- End Cloudflare Web Analytics -->",
     "GMEEK_VERSION":"main"
 }

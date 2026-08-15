@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", function() {
         + '@media(max-width:1249px){.toc{position:static;top:auto;left:auto;transform:none;padding:12px 16px;margin:0 auto 20px auto;max-height:40vh;width:80%;}}';
     loadResource('style', {css: css});
 
-    loadResource('script', { src: 'https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.27.4/tocbot.min.js' }, function() {
+    loadResource('script', { src: '/assets/tocbot.min.js' }, function() {
         tocbot.init({
             tocSelector: '.toc',
             contentSelector: '.markdown-body',
@@ -58,6 +58,6 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     });
 
-    loadResource('link', { rel: 'stylesheet', href: 'https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.27.4/tocbot.css' });
+    loadResource('link', { rel: 'stylesheet', href: '/assets/tocbot.min.css' });
     console.log("\n %c GmeekTocBot Plugins https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#C333D0;color:#fff");
 });
