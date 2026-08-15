@@ -668,5 +668,3 @@ ResourceOwnerForgetBuffer(CurrentResourceOwner, b);  // bufmgr.c:1850
 - [interdb](https://www.interdb.jp/pg/pgsql08/index.html)
 - PostgreSQL 14.4 源码:  src\backend\storage\buffer\bufmgr.c
 - `src/backend/storage/buffer/README`
-
-##{"lang":"zh","pair":"/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html"}
