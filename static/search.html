@@ -49,7 +49,6 @@
 <script src="/pagefind/pagefind-ui.js"></script>
 <script>
 document.getElementById("pathHome").setAttribute("d",IconList["home"]);
-let theme=localStorage.getItem("meek_theme")||"light";
 let themeSettings={"dark":["dark","moon","#00f0ff"],"light":["light","sun","#ff5000"],"auto":["auto","sync",""]};
 function modeSwitch(){
     let currentMode=document.documentElement.getAttribute('data-color-mode');
