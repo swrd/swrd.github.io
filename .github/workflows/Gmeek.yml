@@ -2,6 +2,13 @@ name: build Gmeek
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "backup/**"
+      - "blogBase.json"
   issues:
     types: [opened, edited]
   schedule:
