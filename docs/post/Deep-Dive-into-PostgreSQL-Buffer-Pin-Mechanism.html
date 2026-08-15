@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta name="keywords" content="PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化">
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <script src="/assets/icons.js"></script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
+    <link rel="canonical" href="https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="1. The Essence of a Buffer Pin: Three Words — 'Don't Touch It'
+
+1.1 The Core Definition
+
+The meaning of **Pin** is remar...">
+<meta property="og:title" content="Deep Dive into PostgreSQL Buffer Pin Mechanism">
+<meta property="og:description" content="1. The Essence of a Buffer Pin: Three Words — 'Don't Touch It'
+
+1.1 The Core Definition
+
+The meaning of **Pin** is remar...">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html">
+<meta property="og:image" content="https://pg-internal.com/avatar.jpg">
+<title>Deep Dive into PostgreSQL Buffer Pin Mechanism</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Deep Dive into PostgreSQL Buffer Pin Mechanism","description":"1. The Essence of a Buffer Pin: Three Words \u2014 \u0027Don\u0027t Touch It\u0027\n\n1.1 The Core Definition\n\nThe meaning of **Pin** is remar...","datePublished":"2026-08-15","url":"https://pg-internal.com/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html","author":{"@type":"Person","name":"PGStone"}}
+</script>
+<link href="/assets/starry-night.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+.postMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--color-fg-muted);
+}
+.postMeta .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.postMeta .Label {
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">Deep Dive into PostgreSQL Buffer Pin Mechanism</h1>
+<div class="title-right">
+    <a href="https://pg-internal.com" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/17" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="postMeta">
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
+        2026-08-15
+    </span>
+    
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
+        约 80 分钟
+    </span>
+    
+    
+    <span class="Label" style="background-color:#0969da">en</span>
+    
+</div>
+<div class="markdown-body" id="postBody"><h2>1. The Essence of a Buffer Pin: Three Words — "Don't Touch It"</h2>
+<h3>1.1 The Core Definition</h3>
+<p>The meaning of <strong>Pin</strong> is remarkably simple:</p>
+<blockquote>
+<p>As long as any process holds a pin on a buffer, that buffer will <strong>never, under any circumstances</strong> be evicted and replaced.</p>
+</blockquote>
+<p>This is a <strong>hard invariant</strong> of PostgreSQL buffer management. There are no exceptions.</p>
+<p>Here is the authoritative definition from the source code (<code class="notranslate">src/backend/storage/buffer/README:35</code>):</p>
+<pre class="notranslate"><code class="notranslate">Pins: one must "hold a pin on" a buffer before being allowed to do anything
+at all with it. An unpinned buffer is subject to being reclaimed and reused
+for a different page at any instant, so touching it is unsafe.
+</code></pre>
+<p>In other words:</p>
+<ul>
+<li>Before you can do <em>anything</em> with a buffer, you must pin it first</li>
+<li>An unpinned buffer may be reclaimed and reused at any moment</li>
+<li>Touching an unpinned buffer is <strong>unsafe</strong></li>
+</ul>
+<h3>1.2 refcount: How a Pin Is Implemented</h3>
+<p>In PostgreSQL, a pin is implemented as a <strong>reference count (refcount)</strong>.</p>
+<p>Every buffer descriptor (<code class="notranslate">BufferDesc</code>) contains a 32-bit <code class="notranslate">state</code> field, whose <strong>lowest 18 bits</strong> hold the refcount:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/include/storage/buf_internals.h:29-33</span>
+<span class="pl-c">/*</span>
+<span class="pl-c"> * Buffer state is a single 32-bit variable where following data is combined.</span>
+<span class="pl-c"> *</span>
+<span class="pl-c"> * - 18 bits refcount      &lt;- Pin count</span>
+<span class="pl-c"> * - 4 bits usage count    &lt;- Frequency of use</span>
+<span class="pl-c"> * - 10 bits of flags      &lt;- State flags</span>
+<span class="pl-c"> */</span>
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span> 1
+<span class="pl-k">#define</span> <span class="pl-c1">BUF_REFCOUNT_MASK</span> ((1U &lt;&lt; 18) - 1)  // max value 262,143</pre></div>
+<p><strong>Key numbers</strong>:</p>
+<ul>
+<li>Width: 18 bits</li>
+<li>Maximum: 2^18 - 1 = <strong>262,143</strong></li>
+<li>Meaning: more than 260,000 processes can pin the same buffer simultaneously</li>
+</ul>
+<p>As shown in <code class="notranslate">src/include/storage/buf_internals.h</code>, the <code class="notranslate">state</code> field inside <code class="notranslate">BufferDesc</code> is a 32-bit atomic variable that stores both refcount and usage_count:</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3"><img loading="lazy" width="1098" height="691" alt="Image" src="https://github.com/user-attachments/assets/867bb929-385e-44a5-a2c0-3f09aa470eb3" style="max-width: 100%; height: auto; max-height: 691px;; aspect-ratio: 1098 / 691; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<hr>
+<h2>2. Pin, Lock, and Usage Count: The Division of Labor</h2>
+<p>People often confuse Pin, Lock, and Usage Count. One diagram is worth a thousand words:</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2"><img loading="lazy" width="1049" height="486" alt="Image" src="https://github.com/user-attachments/assets/dc32f4fe-ee44-4c5a-be74-e53f292b3bf2" style="max-width: 100%; height: auto; max-height: 486px;; aspect-ratio: 1049 / 486; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<h3>2.1 Side-by-Side Comparison</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">Property</th>
+<th align="left"><strong>Pin (refcount)</strong></th>
+<th align="left"><strong>Lock (content_lock)</strong></th>
+<th align="left"><strong>Usage Count</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><strong>Purpose</strong></td>
+<td align="left">Prevents buffer eviction</td>
+<td align="left">Protects data contents during concurrent access</td>
+<td align="left">Influences eviction priority</td>
+</tr>
+<tr>
+<td align="left"><strong>Analogy</strong></td>
+<td align="left">Library card</td>
+<td align="left">Reading-room door lock</td>
+<td align="left">Popularity</td>
+</tr>
+<tr>
+<td align="left"><strong>Hold duration</strong></td>
+<td align="left">Can be long</td>
+<td align="left">Must be short</td>
+<td align="left">N/A (managed automatically)</td>
+</tr>
+<tr>
+<td align="left"><strong>Hard invariant</strong></td>
+<td align="left">✅ Yes</td>
+<td align="left">✅ Yes</td>
+<td align="left">❌ No (soft signal)</td>
+</tr>
+<tr>
+<td align="left"><strong>Value range</strong></td>
+<td align="left">0 ~ 262,143</td>
+<td align="left">Shared / Exclusive / None</td>
+<td align="left">0 ~ 5</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>2.2 The Dependency: Pin Before Lock</h3>
+<p>This is the iron rule of PostgreSQL (<code class="notranslate">README:35</code>):</p>
+<blockquote>
+<p><strong>"One must pin a buffer before trying to lock it."</strong></p>
+</blockquote>
+<p>Why? Consider this:</p>
+<ol>
+<li>You acquire the content lock on a buffer</li>
+<li>Meanwhile, another process evicts that buffer and reuses it for a different page</li>
+<li>You are still reading the old data? <strong>Disaster!</strong></li>
+</ol>
+<p>That is why you must pin first (to guarantee the buffer won't be replaced), then lock (to guarantee the contents won't be modified concurrently).</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811"><img loading="lazy" width="1060" height="703" alt="Image" src="https://github.com/user-attachments/assets/f68d3c95-1160-42bb-8cec-7a4bea749811" style="max-width: 100%; height: auto; max-height: 703px;; aspect-ratio: 1060 / 703; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<h3>2.3 The Five Access Rules</h3>
+<p>The <code class="notranslate">README</code> defines 5 buffer access rules:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="center">Rule</th>
+<th align="left">Requires</th>
+<th align="left">Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center"><strong>#1</strong></td>
+<td align="left">Pin + (shared or exclusive) Lock</td>
+<td align="left">Scan a page, check tuple visibility</td>
+</tr>
+<tr>
+<td align="center"><strong>#2</strong></td>
+<td align="left">Pin only</td>
+<td align="left">Access tuple data whose visibility is already determined</td>
+</tr>
+<tr>
+<td align="center"><strong>#3</strong></td>
+<td align="left">Pin + exclusive Lock</td>
+<td align="left">Insert a tuple or modify xmin/xmax</td>
+</tr>
+<tr>
+<td align="center"><strong>#4</strong></td>
+<td align="left">Pin + shared Lock</td>
+<td align="left">Update commit status bits (hint bits)</td>
+</tr>
+<tr>
+<td align="center"><strong>#5</strong></td>
+<td align="left">Pin + exclusive Lock + refcount=1</td>
+<td align="left">Physically remove tuples (Cleanup Lock)</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>Note rule #5: the <strong>Cleanup Lock</strong> requires not only an exclusive lock but also <code class="notranslate">refcount=1</code>, meaning the current process is the <em>only</em> pin holder. This is what VACUUM needs when physically removing dead tuples.</p>
+<hr>
+<h2>3. An Elegant Design: Two-Level Reference Counting</h2>
+<h3>3.1 The Problem: Contention Under High Concurrency</h3>
+<p>What would happen if every Pin/Unpin modified the shared refcount in shared memory directly?</p>
+<pre class="notranslate"><code class="notranslate">Process A: Pin(buf1) → refcount++   -- requires an atomic operation
+Process B: Pin(buf1) → refcount++   -- requires an atomic operation
+Process C: Pin(buf1) → refcount++   -- requires an atomic operation
+...
+</code></pre>
+<p>Under heavy concurrency, many processes competing over a single atomic variable would crush performance.</p>
+<h3>3.2 The Solution: Private Count + Shared Count</h3>
+<p>PostgreSQL's solution is remarkably elegant:</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc"><img loading="lazy" width="1060" height="800" alt="Image" src="https://github.com/user-attachments/assets/cd297861-ed57-444e-b8e4-28123898a7cc" style="max-width: 100%; height: auto; max-height: 800px;; aspect-ratio: 1060 / 800; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<p><strong>The core idea</strong>:</p>
+<ol>
+<li><strong>Private reference count</strong> (PrivateRefCount): maintained by each process in its own local memory</li>
+<li><strong>Shared reference count</strong> (refcount): lives in the BufferDesc in shared memory</li>
+</ol>
+<p><strong>How it works</strong>:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">Operation</th>
+<th align="left">Private count</th>
+<th align="left">Shared count</th>
+<th align="left">Contention</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">First pin of a buffer</td>
+<td align="left">0 → 1</td>
+<td align="left">+1</td>
+<td align="left">Atomic operation required</td>
+</tr>
+<tr>
+<td align="left">Pin the same buffer again</td>
+<td align="left">+1</td>
+<td align="left">unchanged</td>
+<td align="left"><strong>No contention!</strong></td>
+</tr>
+<tr>
+<td align="left">Unpin (not the last one)</td>
+<td align="left">-1</td>
+<td align="left">unchanged</td>
+<td align="left"><strong>No contention!</strong></td>
+</tr>
+<tr>
+<td align="left">Final unpin</td>
+<td align="left">1 → 0</td>
+<td align="left">-1</td>
+<td align="left">Atomic operation required</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>The payoff</strong>: for repeated pin/unpin of the same buffer within one process, only the first pin and the last unpin ever touch shared memory!</p>
+<h3>3.3 Storage Layout of the Private Count</h3>
+<p>The private reference count uses a hybrid "array + hash table" storage:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// src/backend/storage/buffer/bufmgr.c:88, 197-201</span>
+
+<span class="pl-k">#define</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span> 8  // size of the fast-path array
+
+<span class="pl-k">static</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;  <span class="pl-c">// overflow hash table</span></pre></div>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="left">Component</th>
+<th align="left">Size</th>
+<th align="left">Lookup</th>
+<th align="left">Design intent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">Fast-path array</td>
+<td align="left">8 entries (64 bytes)</td>
+<td align="left">O(8) linear scan</td>
+<td align="left">Quick access to hot buffers</td>
+</tr>
+<tr>
+<td align="left">Overflow hash table</td>
+<td align="left">Dynamically grown, unbounded</td>
+<td align="left">O(1) hash lookup</td>
+<td align="left">Handles large numbers of pinned buffers</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>Why exactly 64 bytes?</strong></p>
+<p>Because 64 bytes matches the <strong>cache line size</strong> of most CPUs, so the whole array can be loaded into the CPU cache in one go — extremely fast to access.</p>
+<hr>
+<h2>4. Implementation Details of the Pin Operation</h2>
+<h3>4.1 The Call Chain</h3>
+<pre class="notranslate"><code class="notranslate">ReadBuffer()                           ← simplified entry (bufmgr.c:697)
+    │
+    └── ReadBufferExtended()           ← extended entry (bufmgr.c:744)
+            │
+            └── ReadBuffer_common()    ← core implementation (bufmgr.c:807)
+                    │
+                    └── BufferAlloc()  ← allocate/look up buffer (bufmgr.c:1107)
+                            │
+                            ├── PinBuffer()        ← on buffer hit (bufmgr.c:1692)
+                            │
+                            └── PinBuffer_Locked() ← on newly allocated buffer (bufmgr.c:1795)
+</code></pre>
+<h3>The Call Chain Explained</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Function</th>
+<th>Location</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">ReadBuffer</code></td>
+<td>bufmgr.c:697</td>
+<td>Simplified API, reads MAIN_FORKNUM</td>
+</tr>
+<tr>
+<td><code class="notranslate">ReadBufferExtended</code></td>
+<td>bufmgr.c:744</td>
+<td>Supports specifying fork and read mode</td>
+</tr>
+<tr>
+<td><code class="notranslate">ReadBuffer_common</code></td>
+<td>bufmgr.c:807</td>
+<td>Unified handling of local/shared buffers</td>
+</tr>
+<tr>
+<td><code class="notranslate">BufferAlloc</code></td>
+<td>bufmgr.c:1107</td>
+<td>Allocation and lookup of shared buffers</td>
+</tr>
+<tr>
+<td><code class="notranslate">PinBuffer</code></td>
+<td>bufmgr.c:1692</td>
+<td>Lock-free pin (CAS)</td>
+</tr>
+<tr>
+<td><code class="notranslate">PinBuffer_Locked</code></td>
+<td>bufmgr.c:1795</td>
+<td>Pin while holding the spinlock</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>4.2 The Core Design of Pinning</h3>
+<p>PostgreSQL uses a <strong>two-level reference counting</strong> scheme to implement buffer pins:</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66"><img loading="lazy" width="1014" height="787" alt="Image" src="https://github.com/user-attachments/assets/5df82393-6a43-4c90-92c4-8ee91f844c66" style="max-width: 100%; height: auto; max-height: 787px;; aspect-ratio: 1014 / 787; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<h4>Design Advantages</h4>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Level</th>
+<th>Storage</th>
+<th>Purpose</th>
+<th>Performance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Private reference count</strong></td>
+<td>Backend-local memory</td>
+<td>Records how many times <em>this</em> process pinned the buffer</td>
+<td>Lock-free access, extremely fast</td>
+</tr>
+<tr>
+<td><strong>Shared reference count</strong></td>
+<td><code class="notranslate">BufferDesc-&gt;state</code></td>
+<td>Total pin count of the buffer across all processes</td>
+<td>Atomic operations, contended</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><strong>Design intent</strong>: when the same process pins the same buffer repeatedly, only the private count is touched — no contention on the shared state. The shared refcount is updated only on the first pin and the final unpin.</p>
+<h3>4.3 Key Data Structures</h3>
+<h4>4.3.1 The Private Reference Count Entry</h4>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:81-85</span>
+<span class="pl-k">typedef</span> <span class="pl-k">struct</span> <span class="pl-smi">PrivateRefCountEntry</span>
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-c1">buffer</span>;     <span class="pl-c">// buffer number (1-based)</span>
+    <span class="pl-smi">int32</span>       <span class="pl-c1">refcount</span>;   <span class="pl-c">// pin count of this process</span>
+} <span class="pl-smi">PrivateRefCountEntry</span>;</pre></div>
+<h4>4.3.2 Private Reference Count Storage</h4>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// bufmgr.c:197-201</span>
+
+<span class="pl-c">// Fast-path array: holds the 8 most-used buffers</span>
+<span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+
+<span class="pl-c">// Overflow hash table: used beyond 8 buffers</span>
+<span class="pl-k">static</span> <span class="pl-smi">HTAB</span> <span class="pl-c1">*</span><span class="pl-s1">PrivateRefCountHash</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;
+
+<span class="pl-c">// Overflow counter</span>
+<span class="pl-k">static</span> <span class="pl-smi">int32</span> <span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+<span class="pl-c">// Clock hand: selects which array entry to move to the hash table</span>
+<span class="pl-k">static</span> <span class="pl-smi">uint32</span> <span class="pl-s1">PrivateRefCountClock</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+<span class="pl-c">// A reserved free entry</span>
+<span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">NULL</span>;</pre></div>
+<h3>4.4 Complete Pin Flow Diagrams</h3>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746"><img loading="lazy" width="942" height="901" alt="Image" src="https://github.com/user-attachments/assets/f7f12ece-399e-4c6c-bd8b-07ab1975e746" style="max-width: 100%; height: auto; max-height: 901px;; aspect-ratio: 942 / 901; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849"><img loading="lazy" width="947" height="216" alt="Image" src="https://github.com/user-attachments/assets/a7b75854-bf5f-4d8e-9d46-e4fb15b36849" style="max-width: 100%; height: auto; max-height: 216px;; aspect-ratio: 947 / 216; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<h4>4.4.1 PinBuffer() in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1692-1771</code></p>
+<p>This is the pin path used when <strong>not holding the spinlock</strong>. It updates state with a lock-free CAS loop:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">bool</span>
+<span class="pl-en">PinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>)
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+    <span class="pl-smi">bool</span>        <span class="pl-s1">result</span>;
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+
+    <span class="pl-c">// Step 1: look up the private reference count entry</span>
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, true);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">ref</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-c">// Case A: first pin of this buffer, must update the shared count</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
+        <span class="pl-smi">uint32</span>      <span class="pl-s1">old_buf_state</span>;
+
+        <span class="pl-c">// Step 2: reserve space for a private refcount entry</span>
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+
+        <span class="pl-c">// Step 3: create a new private refcount entry</span>
+        <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
+
+        <span class="pl-c">// Step 4: CAS loop to update the shared refcount</span>
+        <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+        <span class="pl-k">for</span> (;;)
+        {
+            <span class="pl-c">// If the buffer header is locked, wait for it</span>
+            <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+                <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+
+            <span class="pl-c">// Increase the shared refcount</span>
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+            <span class="pl-c">// Update usage_count (for the replacement algorithm)</span>
+            <span class="pl-k">if</span> (<span class="pl-s1">strategy</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+            {
+                <span class="pl-c">// Default strategy: raise usage_count up to the max</span>
+                <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">BM_MAX_USAGE_COUNT</span>)
+                    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+            }
+            <span class="pl-k">else</span>
+            {
+                <span class="pl-c">// Ring buffer strategy: only set it to 1, avoid evicting others</span>
+                <span class="pl-k">if</span> (<span class="pl-en">BUF_STATE_GET_USAGECOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+                    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_USAGECOUNT_ONE</span>;
+            }
+
+            <span class="pl-c">// Atomic CAS update</span>
+            <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
+                                               <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
+            {
+                <span class="pl-s1">result</span> <span class="pl-c1">=</span> (<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_VALID</span>) <span class="pl-c1">!=</span> <span class="pl-c1">0</span>;
+
+                <span class="pl-c">// Valgrind: mark buffer memory as accessible</span>
+                <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+                <span class="pl-k">break</span>;
+            }
+            <span class="pl-c">// CAS failed; old_buf_state now holds the current value, retry</span>
+        }
+    }
+    <span class="pl-k">else</span>
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-c">// Case B: already pinned, no shared state change needed</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════</span>
+        <span class="pl-s1">result</span> <span class="pl-c1">=</span> true;
+    }
+
+    <span class="pl-c">// Step 5: increase the private refcount</span>
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
+
+    <span class="pl-c">// Step 6: record in ResourceOwner (auto-release at transaction end)</span>
+    <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+
+    <span class="pl-k">return</span> <span class="pl-s1">result</span>;
+}</pre></div>
+<h5>Key Techniques</h5>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Technique</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CAS loop</strong></td>
+<td><code class="notranslate">pg_atomic_compare_exchange_u32</code> implements optimistic locking, avoiding spinlock overhead</td>
+</tr>
+<tr>
+<td><strong>Waiting for unlock</strong></td>
+<td>If <code class="notranslate">BM_LOCKED</code> is set, call <code class="notranslate">WaitBufHdrUnlocked</code></td>
+</tr>
+<tr>
+<td><strong>usage_count</strong></td>
+<td>Under the default strategy it grows up to 5, steering the Clock-Sweep replacement algorithm</td>
+</tr>
+<tr>
+<td><strong>Ring strategy</strong></td>
+<td>Used for bulk scans; usage_count is only set to 1 to reduce cache pollution</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h4>4.4.2 PinBuffer_Locked() in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1795-1829</code></p>
+<p>This is the pin path used while <strong>holding the spinlock</strong>, for a freshly allocated victim buffer:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
+<span class="pl-en">PinBuffer_Locked</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>)
+{
+    <span class="pl-smi">Buffer</span>      <span class="pl-s1">b</span>;
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+    <span class="pl-smi">uint32</span>      <span class="pl-s1">buf_state</span>;
+
+    <span class="pl-c">// Precondition: no pre-existing private refcount for this buffer</span>
+    <span class="pl-en">Assert</span>(<span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>), false) <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>);
+
+    <span class="pl-c">// Valgrind: mark buffer memory as accessible</span>
+    <span class="pl-en">VALGRIND_MAKE_MEM_DEFINED</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Step 1: read state and bump the refcount</span>
+    <span class="pl-c">// We hold the spinlock, so a plain modification is safe (no CAS)</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>);  <span class="pl-c">// confirm spinlock is held</span>
+    <span class="pl-s1">buf_state</span> <span class="pl-c1">+=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Step 2: release the spinlock (write new state, clear BM_LOCKED)</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-en">UnlockBufHdr</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">buf_state</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Step 3: create the private refcount entry (spinlock released)</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">NewPrivateRefCountEntry</span>(<span class="pl-s1">b</span>);
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">++</span>;
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Step 4: record in ResourceOwner</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+    <span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+}</pre></div>
+<h5>Differences from PinBuffer</h5>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Property</th>
+<th>PinBuffer</th>
+<th>PinBuffer_Locked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>When called</strong></td>
+<td>Buffer already in cache</td>
+<td>Freshly allocated victim buffer</td>
+</tr>
+<tr>
+<td><strong>Lock state</strong></td>
+<td>Not holding spinlock</td>
+<td>Holding spinlock</td>
+</tr>
+<tr>
+<td><strong>Update method</strong></td>
+<td>CAS loop</td>
+<td>Direct write</td>
+</tr>
+<tr>
+<td><strong>usage_count</strong></td>
+<td>May be updated</td>
+<td>Not updated</td>
+</tr>
+<tr>
+<td><strong>Pre-existing refcount</strong></td>
+<td>Allowed</td>
+<td>Not allowed</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>4.5 Managing the Private Reference Count</h3>
+<h4>4.5.1 Storage Strategy</h4>
+<p>A hybrid <strong>array + hash table</strong> storage optimizes for the common case:</p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d"><img loading="lazy" width="1015" height="818" alt="Image" src="https://github.com/user-attachments/assets/ed5b6828-1359-4428-b5a4-a8612cdc187d" style="max-width: 100%; height: auto; max-height: 818px;; aspect-ratio: 1015 / 818; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<p><a target="_blank" rel="noopener noreferrer" href="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6"><img loading="lazy" width="1017" height="244" alt="Image" src="https://github.com/user-attachments/assets/576e5242-2b27-47ee-af7c-f502202d4fb6" style="max-width: 100%; height: auto; max-height: 244px;; aspect-ratio: 1017 / 244; background-color: var(--bgColor-muted); border-radius: 6px" class="js-gh-image-fallback"></a></p>
+<h4>4.5.2 Core Functions</h4>
+<h5>ReservePrivateRefCountEntry() - <code class="notranslate">bufmgr.c:214-275</code></h5>
+<p>Reserves a free refcount entry:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span> <span class="pl-en">ReservePrivateRefCountEntry</span>(<span class="pl-smi">void</span>)
+{
+    <span class="pl-c">// Already reserved? Return directly</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-k">return</span>;
+
+    <span class="pl-c">// First, look for a free slot in the array</span>
+    <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">InvalidBuffer</span>)
+        {
+            <span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span> <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>];
+            <span class="pl-k">return</span>;
+        }
+    }
+
+    <span class="pl-c">// Array is full: use the clock algorithm to pick a victim to move to the hash table</span>
+    <span class="pl-s1">ReservedRefCountEntry</span> <span class="pl-c1">=</span>
+        <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">PrivateRefCountClock</span><span class="pl-c1">++</span> % <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>];
+
+    <span class="pl-c">// Move the victim into the hash table</span>
+    <span class="pl-s1">hashent</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>,
+                          <span class="pl-c1">&amp;</span>(<span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span>),
+                          <span class="pl-c1">HASH_ENTER</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
+    <span class="pl-s1">hashent</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
+
+    <span class="pl-c">// Clear the array slot</span>
+    <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">InvalidBuffer</span>;
+    <span class="pl-s1">ReservedRefCountEntry</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+
+    <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">++</span>;
+}</pre></div>
+<h5>GetPrivateRefCountEntry() - <code class="notranslate">bufmgr.c:306-379</code></h5>
+<p>Looks up the refcount entry for a given buffer:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span>
+<span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-smi">Buffer</span> <span class="pl-s1">buffer</span>, <span class="pl-smi">bool</span> <span class="pl-s1">do_move</span>)
+{
+    <span class="pl-c">// 1. Search the array first (O(8))</span>
+    <span class="pl-k">for</span> (<span class="pl-s1">i</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>; <span class="pl-s1">i</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">REFCOUNT_ARRAY_ENTRIES</span>; <span class="pl-s1">i</span><span class="pl-c1">++</span>)
+    {
+        <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>].<span class="pl-c1">buffer</span> <span class="pl-c1">==</span> <span class="pl-s1">buffer</span>)
+            <span class="pl-k">return</span> <span class="pl-c1">&amp;</span><span class="pl-s1">PrivateRefCountArray</span>[<span class="pl-s1">i</span>];
+    }
+
+    <span class="pl-c">// 2. If nothing ever overflowed, it cannot be in the hash table</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">PrivateRefCountOverflowed</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+        <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
+
+    <span class="pl-c">// 3. Look in the hash table</span>
+    <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_FIND</span>, <span class="pl-c1">NULL</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">res</span> <span class="pl-c1">==</span> <span class="pl-c1">NULL</span>)
+        <span class="pl-k">return</span> <span class="pl-c1">NULL</span>;
+
+    <span class="pl-c">// 4. If do_move=true, move the entry back into the array to speed up</span>
+    <span class="pl-c">//    subsequent accesses</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">do_move</span>)
+    {
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+        <span class="pl-s1">free</span> <span class="pl-c1">=</span> <span class="pl-s1">ReservedRefCountEntry</span>;
+        <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">buffer</span> <span class="pl-c1">=</span> <span class="pl-s1">buffer</span>;
+        <span class="pl-s1">free</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">=</span> <span class="pl-s1">res</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span>;
+
+        <span class="pl-c">// Remove from the hash table</span>
+        <span class="pl-en">hash_search</span>(<span class="pl-s1">PrivateRefCountHash</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buffer</span>, <span class="pl-c1">HASH_REMOVE</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">found</span>);
+        <span class="pl-s1">PrivateRefCountOverflowed</span><span class="pl-c1">--</span>;
+
+        <span class="pl-k">return</span> <span class="pl-s1">free</span>;
+    }
+
+    <span class="pl-k">return</span> <span class="pl-s1">res</span>;
+}</pre></div>
+<h4>4.5.3 Pin Calls Inside BufferAlloc</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1107-1405</code></p>
+<p><code class="notranslate">BufferAlloc</code> is the sub-function of <code class="notranslate">ReadBuffer_common</code> that allocates or finds a buffer in the shared pool:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span>
+<span class="pl-en">BufferAlloc</span>(<span class="pl-smi">SMgrRelation</span> <span class="pl-s1">smgr</span>, <span class="pl-smi">char</span> <span class="pl-s1">relpersistence</span>, <span class="pl-smi">ForkNumber</span> <span class="pl-s1">forkNum</span>,
+            <span class="pl-smi">BlockNumber</span> <span class="pl-s1">blockNum</span>, <span class="pl-smi">BufferAccessStrategy</span> <span class="pl-s1">strategy</span>, <span class="pl-smi">bool</span> <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span>)
+{
+    <span class="pl-c">// Build the BufferTag</span>
+    <span class="pl-en">INIT_BUFFERTAG</span>(<span class="pl-s1">newTag</span>, <span class="pl-s1">smgr</span><span class="pl-c1">-&gt;</span><span class="pl-c1">smgr_rnode</span>.<span class="pl-c1">node</span>, <span class="pl-s1">forkNum</span>, <span class="pl-s1">blockNum</span>);
+    <span class="pl-s1">newHash</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableHashCode</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>);
+    <span class="pl-s1">newPartitionLock</span> <span class="pl-c1">=</span> <span class="pl-en">BufMappingPartitionLock</span>(<span class="pl-s1">newHash</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Case 1: look up the buffer in the hash table</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-en">LWLockAcquire</span>(<span class="pl-s1">newPartitionLock</span>, <span class="pl-c1">LW_SHARED</span>);
+    <span class="pl-s1">buf_id</span> <span class="pl-c1">=</span> <span class="pl-en">BufTableLookup</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">newTag</span>, <span class="pl-s1">newHash</span>);
+
+    <span class="pl-k">if</span> (<span class="pl-s1">buf_id</span> &gt;= <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c">// Buffer hit!</span>
+        <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">GetBufferDescriptor</span>(<span class="pl-s1">buf_id</span>);
+
+        <span class="pl-c">// Call PinBuffer (not holding the spinlock)</span>
+        <span class="pl-s1">valid</span> <span class="pl-c1">=</span> <span class="pl-en">PinBuffer</span>(<span class="pl-s1">buf</span>, <span class="pl-s1">strategy</span>);        <span class="pl-c">// ← the pin</span>
+
+        <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
+        <span class="pl-c1">*</span><span class="pl-s1">foundPtr</span> <span class="pl-c1">=</span> true;
+
+        <span class="pl-c">// Handle the BM_VALID check...</span>
+        <span class="pl-k">return</span> <span class="pl-s1">buf</span>;
+    }
+
+    <span class="pl-en">LWLockRelease</span>(<span class="pl-s1">newPartitionLock</span>);
+
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-c">// Case 2: buffer miss, need to allocate a new buffer</span>
+    <span class="pl-c">// ═══════════════════════════════════════════════════════════════</span>
+    <span class="pl-k">for</span> (;;)
+    {
+        <span class="pl-c">// Reserve space for a private refcount entry</span>
+        <span class="pl-en">ReservePrivateRefCountEntry</span>();
+
+        <span class="pl-c">// Get a victim buffer (returned holding the spinlock)</span>
+        <span class="pl-s1">buf</span> <span class="pl-c1">=</span> <span class="pl-en">StrategyGetBuffer</span>(<span class="pl-s1">strategy</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">buf_state</span>);
+
+        <span class="pl-c">// Call PinBuffer_Locked (holding the spinlock)</span>
+        <span class="pl-en">PinBuffer_Locked</span>(<span class="pl-s1">buf</span>);                   <span class="pl-c">// ← the pin</span>
+
+        <span class="pl-c">// Handle dirty-page writeout, re-validation, etc...</span>
+
+        <span class="pl-c">// On success, return the buffer</span>
+        <span class="pl-c">// Otherwise UnpinBuffer and retry</span>
+    }
+}</pre></div>
+<h4>4.5.4 UnpinBuffer in Depth</h4>
+<p><strong>Source</strong>: <code class="notranslate">bufmgr.c:1840-1923</code></p>
+<p>The counterpart of pin — unpin:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">static</span> <span class="pl-smi">void</span>
+<span class="pl-en">UnpinBuffer</span>(<span class="pl-smi">BufferDesc</span> <span class="pl-c1">*</span><span class="pl-s1">buf</span>, <span class="pl-smi">bool</span> <span class="pl-s1">fixOwner</span>)
+{
+    <span class="pl-smi">PrivateRefCountEntry</span> <span class="pl-c1">*</span><span class="pl-s1">ref</span>;
+    <span class="pl-smi">Buffer</span> <span class="pl-s1">b</span> <span class="pl-c1">=</span> <span class="pl-en">BufferDescriptorGetBuffer</span>(<span class="pl-s1">buf</span>);
+
+    <span class="pl-c">// Get the private refcount entry</span>
+    <span class="pl-s1">ref</span> <span class="pl-c1">=</span> <span class="pl-en">GetPrivateRefCountEntry</span>(<span class="pl-s1">b</span>, false);
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span> <span class="pl-c1">!=</span> <span class="pl-c1">NULL</span>);
+
+    <span class="pl-c">// Remove from the ResourceOwner</span>
+    <span class="pl-k">if</span> (<span class="pl-s1">fixOwner</span>)
+        <span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);
+
+    <span class="pl-c">// Decrease the private refcount</span>
+    <span class="pl-en">Assert</span>(<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>);
+    <span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span><span class="pl-c1">--</span>;
+
+    <span class="pl-k">if</span> (<span class="pl-s1">ref</span><span class="pl-c1">-&gt;</span><span class="pl-c1">refcount</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+        <span class="pl-c">// Last private reference: must update the shared refcount</span>
+        <span class="pl-c">// ═══════════════════════════════════════════════════════════</span>
+
+        <span class="pl-c">// Valgrind: mark the buffer as inaccessible</span>
+        <span class="pl-en">VALGRIND_MAKE_MEM_NOACCESS</span>(<span class="pl-en">BufHdrGetBlock</span>(<span class="pl-s1">buf</span>), <span class="pl-c1">BLCKSZ</span>);
+
+        <span class="pl-c">// Confirm we do not hold the content lock</span>
+        <span class="pl-en">Assert</span>(!<span class="pl-en">LWLockHeldByMe</span>(<span class="pl-en">BufferDescriptorGetContentLock</span>(<span class="pl-s1">buf</span>)));
+
+        <span class="pl-c">// CAS loop to decrease the shared refcount</span>
+        <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">pg_atomic_read_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>);
+        <span class="pl-k">for</span> (;;)
+        {
+            <span class="pl-k">if</span> (<span class="pl-s1">old_buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_LOCKED</span>)
+                <span class="pl-s1">old_buf_state</span> <span class="pl-c1">=</span> <span class="pl-en">WaitBufHdrUnlocked</span>(<span class="pl-s1">buf</span>);
+
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">=</span> <span class="pl-s1">old_buf_state</span>;
+            <span class="pl-s1">buf_state</span> <span class="pl-c1">-=</span> <span class="pl-c1">BUF_REFCOUNT_ONE</span>;  <span class="pl-c">// decrease the refcount</span>
+
+            <span class="pl-k">if</span> (<span class="pl-en">pg_atomic_compare_exchange_u32</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">buf</span><span class="pl-c1">-&gt;</span><span class="pl-c1">state</span>,
+                                               <span class="pl-c1">&amp;</span><span class="pl-s1">old_buf_state</span>, <span class="pl-s1">buf_state</span>))
+            {
+                <span class="pl-c">// If there are waiters and refcount hit 0, wake them up</span>
+                <span class="pl-k">if</span> ((<span class="pl-s1">buf_state</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">BM_PIN_COUNT_WAITER</span>) <span class="pl-c1">&amp;&amp;</span>
+                    <span class="pl-en">BUF_STATE_GET_REFCOUNT</span>(<span class="pl-s1">buf_state</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+                    <span class="pl-c">/* ... wake up waiters ... */</span>
+                <span class="pl-k">break</span>;
+            }
+        }
+
+        <span class="pl-c">// Release the private refcount entry</span>
+        <span class="pl-en">ForgetPrivateRefCountEntry</span>(<span class="pl-s1">ref</span>);
+    }
+}</pre></div>
+<h4>4.5.5 ResourceOwner Integration</h4>
+<p>The pin operation integrates tightly with PostgreSQL's resource tracking system:</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-c">// At the start of ReadBuffer_common</span>
+<span class="pl-en">ResourceOwnerEnlargeBuffers</span>(<span class="pl-s1">CurrentResourceOwner</span>);  <span class="pl-c">// bufmgr.c:820</span>
+
+<span class="pl-c">// At the end of PinBuffer/PinBuffer_Locked</span>
+<span class="pl-en">ResourceOwnerRememberBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1769, 1828</span>
+
+<span class="pl-c">// In UnpinBuffer</span>
+<span class="pl-en">ResourceOwnerForgetBuffer</span>(<span class="pl-s1">CurrentResourceOwner</span>, <span class="pl-s1">b</span>);  <span class="pl-c">// bufmgr.c:1850</span></pre></div>
+<p><strong>Why bother?</strong></p>
+<ol>
+<li><strong>Automatic cleanup</strong>: all pinned buffers are released when the transaction ends</li>
+<li><strong>Leak detection</strong>: detects buffers that remain pinned when they shouldn't</li>
+<li><strong>Resource tracking</strong>: easier debugging and monitoring</li>
+</ol>
+<h2>5. Summary</h2>
+<h3>Core Properties of the Pin Operation</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Property</th>
+<th>Implementation</th>
+<th>Benefit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Lock-free updates</strong></td>
+<td>CAS atomic operations</td>
+<td>Avoids spinlock overhead, better concurrency</td>
+</tr>
+<tr>
+<td><strong>Two-level refcount</strong></td>
+<td>Private + shared</td>
+<td>Minimal contention; repeated pins within a process are nearly free</td>
+</tr>
+<tr>
+<td><strong>Hybrid storage</strong></td>
+<td>Array (≤8) + hash table</td>
+<td>O(1) access in the common case, scales to many pins</td>
+</tr>
+<tr>
+<td><strong>Resource tracking</strong></td>
+<td>ResourceOwner</td>
+<td>Automatic cleanup, prevents leaks</td>
+</tr>
+<tr>
+<td><strong>Eviction-friendly</strong></td>
+<td>usage_count</td>
+<td>Feeds the Clock-Sweep algorithm</td>
+</tr>
+<tr>
+<td><strong>Strategy-aware</strong></td>
+<td>BufferAccessStrategy</td>
+<td>Bulk operations limit cache pollution</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>Performance Considerations</h3>
+<ul>
+<li><strong>Hot buffers</strong>: repeated access within one process only touches the private count — zero contention</li>
+<li><strong>CAS retries</strong>: under extreme contention the CAS loop may retry several times, but it is still cheaper than a spinlock</li>
+<li><strong>Memory layout</strong>: PrivateRefCountArray is 64 bytes — exactly one CPU cache line</li>
+</ul>
+<h2>References</h2>
+<ul>
+<li><a href="https://www.interdb.jp/pg/pgsql08/index.html" rel="nofollow">interdb — The Internals of PostgreSQL, Chapter 8</a></li>
+<li>PostgreSQL 14.4 source: <code class="notranslate">src/backend/storage/buffer/bufmgr.c</code></li>
+<li><code class="notranslate">src/backend/storage/buffer/README</code></li>
+</ul>
+<p><em>This is the English edition of <a href="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html" rel="nofollow">深入理解PostgreSQL Buffer Pin机制</a>.</em></p></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+
+<nav class="postNav">
+    
+    <a href="/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html">
+        <span class="nav-label">&larr; 上一篇</span>
+        <span class="nav-title">深入理解 PostgreSQL Memory Context (2)</span>
+    </a>
+    
+    
+</nav>
+
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pg-internal.com">PG Internal</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            navigator.clipboard.writeText(codeContent).catch(() => {
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = codeContent;
+                tempTextArea.style.position = 'fixed';
+                tempTextArea.style.opacity = '0';
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+            });
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+
+    // Add line numbers to code blocks
+    document.querySelectorAll('.snippet-clipboard-content').forEach(container => {
+        if (container.querySelector('.line-numbers')) return;
+        const pre = container.querySelector('pre');
+        if (!pre) return;
+        const text = pre.textContent || pre.innerText;
+        const lines = text.split('\n');
+        if (lines[lines.length - 1].trim() === '') lines.pop();
+        if (lines.length <= 1) return;
+        const gutter = document.createElement('div');
+        gutter.className = 'line-numbers';
+        for (let i = 1; i <= lines.length; i++) {
+            const span = document.createElement('span');
+            span.textContent = i;
+            gutter.appendChild(span);
+        }
+        container.insertBefore(gutter, container.firstChild);
+        container.classList.add('has-line-numbers');
+    });
+});
+
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
+});
+
+</script>
+<script src='/assets/GmeekTocBot.js' defer></script>
+
+</html>
