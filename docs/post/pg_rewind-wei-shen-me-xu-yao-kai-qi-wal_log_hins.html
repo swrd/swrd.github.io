@@ -5,8 +5,8 @@
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
-    <script src='/assets/GmeekVercount.js'></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
     <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
@@ -27,7 +27,7 @@
 在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://pg-internal.com/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html">
-<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<meta property="og:image" content="https://pg-internal.com/avatar.svg">
 <title>pg_rewind为什么需要开启 wal_log_hins</title>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"pg_rewind\u4e3a\u4ec0\u4e48\u9700\u8981\u5f00\u542f wal_log_hins","description":"\u4e00\u3001`wal_log_hints`\u53c2\u6570\u4f5c\u7528\n\n\uff08\u4e00\uff09Hint bits\u673a\u5236\u6982\u8ff0\n\n\u5728PostgreSQL\u4e2d\uff0cHint bits\u662f\u4e00\u79cd\u7528\u4e8e\u4f18\u5316\u6027\u80fd\u7684\u91cd\u8981\u673a\u5236\uff0c\u5b83\u5b58\u50a8\u5728\u5143\u7ec4\uff08tuple\uff09\u5934\u90e8\u3002","datePublished":"2025-05-16","url":"https://pg-internal.com/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html","author":{"@type":"Person","name":"PGStone"}}
@@ -569,6 +569,6 @@ document.querySelectorAll('#postBody img').forEach(img => {
 });
 
 </script>
-<script src='/assets/GmeekTocBot.js'></script>
+<script src='/assets/GmeekTocBot.js' defer></script>
 
 </html>

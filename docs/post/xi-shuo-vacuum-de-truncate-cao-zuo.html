@@ -5,8 +5,8 @@
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
-    <script src='/assets/GmeekVercount.js'></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
     <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
@@ -23,12 +23,12 @@
 表级别的storage parameter参数vacuum_truncate是在PG12后引入的，加入该参数用来控制是否回收表尾部的空闲空间，在之前的版本中默认是一直回收表尾部的空闲空间。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://pg-internal.com/post/xi-shuo-vacuum-de-truncate-cao-zuo.html">
-<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<meta property="og:image" content="https://pg-internal.com/avatar.svg">
 <title>细说vacuum的truncate操作</title>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"\u7ec6\u8bf4vacuum\u7684truncate\u64cd\u4f5c","description":"\u5f15\u5165\r\n\r\n\u8868\u7ea7\u522b\u7684storage parameter\u53c2\u6570vacuum_truncate\u662f\u5728PG12\u540e\u5f15\u5165\u7684\uff0c\u52a0\u5165\u8be5\u53c2\u6570\u7528\u6765\u63a7\u5236\u662f\u5426\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\uff0c\u5728\u4e4b\u524d\u7684\u7248\u672c\u4e2d\u9ed8\u8ba4\u662f\u4e00\u76f4\u56de\u6536\u8868\u5c3e\u90e8\u7684\u7a7a\u95f2\u7a7a\u95f4\u3002","datePublished":"2025-01-10","url":"https://pg-internal.com/post/xi-shuo-vacuum-de-truncate-cao-zuo.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
-<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+<link href="/assets/starry-night.css" rel="stylesheet" />
 
 
 </head>
@@ -627,6 +627,6 @@ document.querySelectorAll('#postBody img').forEach(img => {
 });
 
 </script>
-<script src='/assets/GmeekTocBot.js'></script>
+<script src='/assets/GmeekTocBot.js' defer></script>
 
 </html>

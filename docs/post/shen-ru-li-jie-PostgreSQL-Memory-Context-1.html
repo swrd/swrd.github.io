@@ -5,8 +5,8 @@
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
-    <script src='/assets/GmeekVercount.js'></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
     <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
@@ -19,12 +19,12 @@
 <meta property="og:description" content="之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-1.html">
-<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<meta property="og:image" content="https://pg-internal.com/avatar.svg">
 <title>深入理解 PostgreSQL Memory Context (1)</title>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3 PostgreSQL Memory Context (1)","description":"\u4e4b\u524d\u5206\u6790\u4e86pg\u7684\u5171\u4eab\u7f13\u5b58\u7ba1\u7406\u539f\u7406\uff0c\u8fd9\u6b21\u5206\u6790\u4e00\u4e0b\u79c1\u6709\u5185\u5b58\u7684\u7ba1\u7406\uff1amemory context\u3002","datePublished":"2026-04-20","url":"https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-1.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
-<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+<link href="/assets/starry-night.css" rel="stylesheet" />
 
 
 </head>
@@ -2136,6 +2136,6 @@ document.querySelectorAll('#postBody img').forEach(img => {
 });
 
 </script>
-<script src='/assets/GmeekTocBot.js'></script>
+<script src='/assets/GmeekTocBot.js' defer></script>
 
 </html>

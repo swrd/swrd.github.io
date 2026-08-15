@@ -5,8 +5,8 @@
     <meta content="text/html; charset=utf-8" http-equiv="content-type" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
-    <script src='/assets/GmeekVercount.js'></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
     <script src="/assets/icons.js"></script>
     <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
     <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
@@ -27,12 +27,12 @@ PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（B
 PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（Buffer Access Strategy），用于优化特定场景下的缓冲区使用。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://pg-internal.com/post/PostgreSQL-Ring-Buffer-ji-zhi-xiang-jie.html">
-<meta property="og:image" content="https://avatars.githubusercontent.com/u/5057571?s=96&v=4">
+<meta property="og:image" content="https://pg-internal.com/avatar.svg">
 <title>PostgreSQL Ring  Buffer 机制详解</title>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BlogPosting","headline":"PostgreSQL Ring  Buffer \u673a\u5236\u8be6\u89e3","description":"1. \u6982\u8ff0\n\n1.1 \u4ec0\u4e48\u662f Buffer Ring\n\nPostgreSQL \u7684 Ring Buffer \u662f\u4e00\u79cd**\u540e\u7aef\u79c1\u6709\u7684\u7f13\u51b2\u533a\u8bbf\u95ee\u7b56\u7565**\uff08Buffer Access Strategy\uff09\uff0c\u7528\u4e8e\u4f18\u5316\u7279\u5b9a\u573a\u666f\u4e0b\u7684\u7f13\u51b2\u533a\u4f7f\u7528\u3002","datePublished":"2026-02-03","url":"https://pg-internal.com/post/PostgreSQL-Ring-Buffer-ji-zhi-xiang-jie.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
-<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+<link href="/assets/starry-night.css" rel="stylesheet" />
 
 
 </head>
@@ -1446,6 +1446,6 @@ document.querySelectorAll('#postBody img').forEach(img => {
 });
 
 </script>
-<script src='/assets/GmeekTocBot.js'></script><script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,theme:'default'});</script>
+<script src='/assets/GmeekTocBot.js' defer></script><script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,theme:'default'});</script>
 
 </html>
