@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PG Internal</title><link>https://pg-internal.com</link><description>道阻且长,行则将至</description><copyright>PG Internal</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://pg-internal.com/avatar.jpg</url><title>avatar</title><link>https://pg-internal.com</link></image><lastBuildDate>Sat, 15 Aug 2026 06:58:32 +0000</lastBuildDate><managingEditor>PG Internal</managingEditor><ttl>60</ttl><webMaster>PG Internal</webMaster><item><title>深入理解 PostgreSQL Memory Context (2)</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html</link><description>七、超大内存分配策略
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>PG Internal</title><link>https://pg-internal.com</link><description>道阻且长,行则将至</description><copyright>PG Internal</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://pg-internal.com/avatar.jpg</url><title>avatar</title><link>https://pg-internal.com</link></image><lastBuildDate>Sat, 15 Aug 2026 07:07:50 +0000</lastBuildDate><managingEditor>PG Internal</managingEditor><ttl>60</ttl><webMaster>PG Internal</webMaster><item><title>深入理解 PostgreSQL Memory Context (2)</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html</link><description>七、超大内存分配策略
 
 7.1 要点
 
@@ -9,12 +9,12 @@ AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。</description><
 
 PostgreSQL 的 Ring Buffer 是一种**后端私有的缓冲区访问策略**（Buffer Access Strategy），用于优化特定场景下的缓冲区使用。</description><guid isPermaLink="true">https://pg-internal.com/post/PostgreSQL-Ring-Buffer-ji-zhi-xiang-jie.html</guid><pubDate>Tue, 03 Feb 2026 11:53:38 +0000</pubDate></item><item><title>深入理解 postgresql buffer usage_count</title><link>https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html</link><description>1. 概述
 
-`usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。</description><guid isPermaLink="true">https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html</guid><pubDate>Mon, 26 Jan 2026 11:22:13 +0000</pubDate></item><item><title>深入理解PostgreSQL_Buffer_Pin机制</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html</link><description>一、Buffer Pin 的本质：三个字——'不准动'
-
-1.1 核心定义
-
-**Pin**（钉住）的含义非常简单：
-
+`usagecount`（使用计数）是 PostgreSQL 缓冲区管理中实现**时钟扫描（Clock Sweep）算法**的核心数据结构。</description><guid isPermaLink="true">https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html</guid><pubDate>Mon, 26 Jan 2026 11:22:13 +0000</pubDate></item><item><title>深入理解PostgreSQL_Buffer_Pin机制</title><link>https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html</link><description>一、Buffer Pin 的本质：三个字——'不准动'&#13;
+&#13;
+1.1 核心定义&#13;
+&#13;
+**Pin**（钉住）的含义非常简单：&#13;
+&#13;
 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就**绝对不会**被淘汰替换。</description><guid isPermaLink="true">https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html</guid><pubDate>Sun, 11 Jan 2026 14:37:15 +0000</pubDate></item><item><title>深入探索 PostgreSQL 18 的新特性</title><link>https://pg-internal.com/post/shen-ru-tan-suo-PostgreSQL-18-de-xin-te-xing.html</link><description>译自：https://xata.io/blog/going-down-the-rabbit-hole-of-postgres-18-features
 
 部分内容略作修改

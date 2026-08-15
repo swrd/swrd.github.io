@@ -34,7 +34,7 @@
 <meta property="og:image" content="https://pg-internal.com/avatar.jpg">
 <title>深入理解PostgreSQL_Buffer_Pin机制</title>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3PostgreSQL_Buffer_Pin\u673a\u5236","description":"\u4e00\u3001Buffer Pin \u7684\u672c\u8d28\uff1a\u4e09\u4e2a\u5b57\u2014\u2014\u0027\u4e0d\u51c6\u52a8\u0027\n\n1.1 \u6838\u5fc3\u5b9a\u4e49\n\n**Pin**\uff08\u9489\u4f4f\uff09\u7684\u542b\u4e49\u975e\u5e38\u7b80\u5355\uff1a\n\n\u53ea\u8981\u6709\u8fdb\u7a0b\u5bf9\u67d0\u4e2a Buffer \u6301\u6709 Pin\uff0c\u8fd9\u4e2a Buffer \u5c31**\u7edd\u5bf9\u4e0d\u4f1a**\u88ab\u6dd8\u6c70\u66ff\u6362\u3002","datePublished":"2026-01-11","url":"https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html","author":{"@type":"Person","name":"PGStone"}}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"\u6df1\u5165\u7406\u89e3PostgreSQL_Buffer_Pin\u673a\u5236","description":"\u4e00\u3001Buffer Pin \u7684\u672c\u8d28\uff1a\u4e09\u4e2a\u5b57\u2014\u2014\u0027\u4e0d\u51c6\u52a8\u0027\r\n\r\n1.1 \u6838\u5fc3\u5b9a\u4e49\r\n\r\n**Pin**\uff08\u9489\u4f4f\uff09\u7684\u542b\u4e49\u975e\u5e38\u7b80\u5355\uff1a\r\n\r\n\u53ea\u8981\u6709\u8fdb\u7a0b\u5bf9\u67d0\u4e2a Buffer \u6301\u6709 Pin\uff0c\u8fd9\u4e2a Buffer \u5c31**\u7edd\u5bf9\u4e0d\u4f1a**\u88ab\u6dd8\u6c70\u66ff\u6362\u3002","datePublished":"2026-01-11","url":"https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html","author":{"@type":"Person","name":"PGStone"}}
 </script>
 <link href="/assets/starry-night.css" rel="stylesheet" />
 
@@ -222,7 +222,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     
     <span class="meta-item">
         <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
-        约 59 分钟
+        约 61 分钟
     </span>
     
     
@@ -1024,7 +1024,8 @@ for a different page at any instant, so touching it is unsafe.
 <li><a href="https://www.interdb.jp/pg/pgsql08/index.html" rel="nofollow">interdb</a></li>
 <li>PostgreSQL 14.4 源码:  src\backend\storage\buffer\bufmgr.c</li>
 <li><code class="notranslate">src/backend/storage/buffer/README</code></li>
-</ul></div>
+</ul>
+<p>##{"lang":"zh","pair":"/post/Deep-Dive-into-PostgreSQL-Buffer-Pin-Mechanism.html"}</p></div>
 <div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
 
 <div id="relatedPosts" style="clear:both;margin-top:48px;border-top:1px solid var(--color-border-default);padding-top:20px;">
