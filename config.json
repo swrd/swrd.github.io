@@ -4,7 +4,7 @@
     "description": "PostgreSQL 数据库技术博客，专注于源码分析、性能优化和运维实战",
     "keywords": "PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化",
     "homeUrl":"https://pg-internal.com",
-    "avatarUrl":"https://pg-internal.com/avatar.svg",
+    "avatarUrl":"https://pg-internal.com/avatar.jpg",
     "faviconUrl":"/PostgreSQL_logo.3colors.svg",
     "singlePage":["link","about"],
     "email":"1367007812@qq.com",
