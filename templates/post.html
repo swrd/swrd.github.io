@@ -160,6 +160,9 @@
 {% block header %}
 <h1 class="postTitle">{{ blogBase['postTitle'] }}</h1>
 <div class="title-right">
+    {% if blogBase.get('langSwitch') %}
+    <a href="{{ blogBase['langSwitch']['pair'] }}" class="btn btn-invisible circle" style="font-size:12px;font-weight:600;" title="{% if blogBase['langSwitch']['lang']=='en' %}切换到中文版{% else %}Switch to English{% endif %}">{% if blogBase['langSwitch']['lang']=='en' %}中{% else %}EN{% endif %}</a>
+    {% endif %}
     <a href="{{ blogBase['homeUrl'] }}" id="buttonHome" class="btn btn-invisible circle" title="{{ i18n['home'] }}">
         <svg class="octicon" width="16" height="16">
             <path id="pathHome" fill-rule="evenodd"></path>

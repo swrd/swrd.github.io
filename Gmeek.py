@@ -149,7 +149,9 @@ class GMEEK():
     def createPostHtml(self,issue):
         mdFileName=re.sub(r'[<>:/\\|?*\"]|[\0-\31]', '-', issue["postTitle"])
         with open(self.backup_dir+mdFileName+".md", 'r', encoding='UTF-8') as f:
-            post_body=self.markdown2html(f.read())
+            raw_md=f.read()
+        raw_md=re.sub(r'(\r?\n)*##\{.*\}\s*$', '', raw_md)
+        post_body=self.markdown2html(raw_md)
 
         post_body=re.sub(r'<img (?![^>]*loading=)', '<img loading="lazy" ', post_body)
 
@@ -206,6 +208,8 @@ class GMEEK():
         postBase["createdDate"]=issue["createdDate"]
         postBase["dateLabelColor"]=issue["dateLabelColor"]
         postBase["postLabels"]=issue["labels"]
+        if "langSwitch" in issue:
+            postBase["langSwitch"]=issue["langSwitch"]
         postBase["wordCount"]=issue.get("wordCount",0)
 
         if issue["labels"][0] in self.blogBase["singlePage"]:
@@ -442,6 +446,11 @@ class GMEEK():
                 self.blogBase[listJsonName][postNum]["ogImage"]=postConfig["ogImage"]
             else:
                 self.blogBase[listJsonName][postNum]["ogImage"]=self.blogBase["ogImage"]
+
+            if "lang" in postConfig and "pair" in postConfig:
+                self.blogBase[listJsonName][postNum]["langSwitch"]={"lang":postConfig["lang"],"pair":postConfig["pair"]}
+            else:
+                self.blogBase[listJsonName][postNum].pop("langSwitch", None)
 
             thisTime=datetime.datetime.fromtimestamp(self.blogBase[listJsonName][postNum]["createdAt"])
             thisTime=thisTime.astimezone(self.TZ)
