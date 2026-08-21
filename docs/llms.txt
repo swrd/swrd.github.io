@@ -1,0 +1,26 @@
+# PG Internal
+
+> PostgreSQL 数据库技术博客，专注于源码分析、性能优化和运维实战
+
+本站当前共 12 篇文章，主题标签包括：源码解析、memory context、ring buffer、buffer usage、buffer pin、新版本特性、PG18、wal_log_hints、pg_rewind、参数解析、autovacuum_naptime、maintenance_work_mem、vacuum、故障处理、PG原理、index only scan、SQL优化。文章按置顶与发布时间从新到旧排列，如需引用或转载请注明出处。
+
+## 文章
+
+- [深入理解 PostgreSQL Memory Context (2)](https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html): 七、超大内存分配策略 7.1 要点 AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。（源码解析、memory context，2026-04-20）
+- [深入理解 PostgreSQL Memory Context (1)](https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-1.html): 之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。（源码解析、memory context，2026-04-20）
+- [PostgreSQL Ring  Buffer 机制详解](https://pg-internal.com/post/PostgreSQL-Ring-Buffer-ji-zhi-xiang-jie.html): 1. 概述 1.1 什么是 Buffer Ring PostgreSQL 的 Ring Buffer 是一种后端私有的缓冲区访问策略（Buffer Access Strategy），用于优化特定场景下的缓冲区使用。（源码解析、ring buffer，2026-02-03）
+- [深入理解 postgresql buffer usage_count](https://pg-internal.com/post/shen-ru-li-jie-postgresql-buffer-usage_count.html): 1. 概述 usagecount（使用计数）是 PostgreSQL 缓冲区管理中实现时钟扫描（Clock Sweep）算法的核心数据结构。（buffer usage、源码解析，2026-01-26）
+- [深入理解PostgreSQL_Buffer_Pin机制](https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL_Buffer_Pin-ji-zhi.html): 一、Buffer Pin 的本质：三个字——'不准动' 1.1 核心定义 Pin（钉住）的含义非常简单： 只要有进程对某个 Buffer 持有 Pin，这个 Buffer 就绝对不会被淘汰替换。（buffer pin、源码解析，2026-01-11）
+- [深入探索 PostgreSQL 18 的新特性](https://pg-internal.com/post/shen-ru-tan-suo-PostgreSQL-18-de-xin-te-xing.html): 译自：https://xata.io/blog/going-down-the-rabbit-hole-of-postgres-18-features 部分内容略作修改 上周，PostgreSQL 18 已被标记为稳定版本。（新版本特性、PG18，2025-10-16）
+- [pg_rewind为什么需要开启 wal_log_hins](https://pg-internal.com/post/pg_rewind-wei-shen-me-xu-yao-kai-qi-wal_log_hins.html): 一、wal_log_hints参数作用 （一）Hint bits机制概述 在PostgreSQL中，Hint bits是一种用于优化性能的重要机制，它存储在元组（tuple）头部。（wal_log_hints、pg_rewind，2025-05-16）
+- [PG参数autovacuum_naptime解析](https://pg-internal.com/post/PG-can-shu-autovacuum_naptime-jie-xi.html): PG autovacuum_naptime 介绍 autovacuum_naptime 参数官方文档描述如下： yaml Specifies the minimum delay between autovacuum runs on...（参数解析、autovacuum_naptime，2025-03-07）
+- [PG参数maintenance_work_mem解析](https://pg-internal.com/post/PG-can-shu-maintenance_work_mem-jie-xi.html): PG maintenance_work_mem介绍 PG 垃圾回收有关的内存参数是maintenance_work_mem或autovacuum_work_mem，如果没有设置autovacuum_work_mem，则使用maintena...（maintenance_work_mem、参数解析，2025-02-20）
+- [处理 PostgreSQL 错误 "found xmin ... from before relfrozenxid ..."](https://pg-internal.com/post/chu-li-PostgreSQL-cuo-wu-found-xmin-...-from-before-relfrozenxid-....html): 我已经看到标题中报告的错误多次了。（vacuum、故障处理，2025-02-12）
+- [细说vacuum的truncate操作](https://pg-internal.com/post/xi-shuo-vacuum-de-truncate-cao-zuo.html): 引入 表级别的storage parameter参数vacuum_truncate是在PG12后引入的，加入该参数用来控制是否回收表尾部的空闲空间，在之前的版本中默认是一直回收表尾部的空闲空间。（vacuum、PG原理，2025-01-10）
+- [PG只读索引优化](https://pg-internal.com/post/PG-zhi-du-suo-yin-you-hua.html): 现在是圣诞节，我的日常工作相对安静，所以让我们再次让它成为故事时间！另一个来自战壕的故事：一个表和一个索引会出错吗？ 几周前，一位用户问我为什么其中一个查询的 “性能不一致”。（index only scan、SQL优化，2025-01-02）
+
+## 站点页面
+
+- [关于](https://pg-internal.com/about.html): 本人DBA一枚，熟悉数据库的运维，也从事过中间件和大数据的运维。
+- [RSS 订阅](https://pg-internal.com/rss.xml): 全站文章 RSS
+- [站点地图](https://pg-internal.com/sitemap.xml): XML 格式的全站页面索引

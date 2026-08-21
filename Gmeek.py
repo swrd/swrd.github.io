@@ -364,6 +364,43 @@ class GMEEK():
             f.write('\n'.join(lines))
         print("====== create sitemap xml ======")
 
+    def createLlmsTxt(self):
+        posts=sorted(self.blogBase["postListJson"].values(),key=lambda x:(x.get("top",0),x["createdAt"]),reverse=True)
+        tags=[]
+        for post in posts:
+            for label in post["labels"]:
+                if label not in tags:
+                    tags.append(label)
+
+        lines=['# '+self.blogBase["displayTitle"],'', '> '+self.blogBase["description"],'']
+        lines.append('本站当前共 %d 篇文章，主题标签包括：%s。文章按置顶与发布时间从新到旧排列，如需引用或转载请注明出处。'% (len(posts),'、'.join(tags)))
+        lines.append('')
+        lines.append('## 文章')
+        lines.append('')
+        for post in posts:
+            meta='、'.join(post['labels'])+'，'+post['createdDate']
+            url=self.blogBase['homeUrl']+'/'+post['postUrl']
+            desc=re.sub(r'\s+',' ',post.get('description','')).strip().replace('*','').replace('`','')
+            if desc:
+                lines.append('- [%s](%s): %s（%s）'% (post['postTitle'],url,desc,meta))
+            else:
+                lines.append('- [%s](%s): %s'% (post['postTitle'],url,meta))
+        lines.append('')
+        lines.append('## 站点页面')
+        lines.append('')
+        for page in self.blogBase['singeListJson'].values():
+            url=self.blogBase['homeUrl']+'/'+page['postUrl']
+            desc=re.sub(r'\s+',' ',page.get('description','')).strip().replace('*','').replace('`','')
+            if desc:
+                lines.append('- [%s](%s): %s'% (page['postTitle'],url,desc))
+            else:
+                lines.append('- [%s](%s)'% (page['postTitle'],url))
+        lines.append('- [RSS 订阅](%s/rss.xml): 全站文章 RSS'% self.blogBase['homeUrl'])
+        lines.append('- [站点地图](%s/sitemap.xml): XML 格式的全站页面索引'% self.blogBase['homeUrl'])
+        with open(self.root_dir+'llms.txt','w',encoding='UTF-8') as f:
+            f.write('\n'.join(lines)+'\n')
+        print("====== create llms.txt ======")
+
     def addOnePostJson(self,issue):
         if len(issue.labels)>=1:
             if issue.labels[0].name in self.blogBase["singlePage"]:
@@ -471,6 +508,7 @@ class GMEEK():
         self.createPlistHtml()
         self.createFeedXml()
         self.createSitemap()
+        self.createLlmsTxt()
         print("====== create static html end ======")
 
     def runOne(self,number_str):
