@@ -36,8 +36,8 @@ __Tom:__ 嗯，我认为我们从中得到的主要是代码的简洁性。当�
 
 所以这肯定有优势，但也有劣势，我想我们稍后会谈到。目前有人在研究转换成线程模型，但那涉及巨大的工作量，我也说不准最终能不能成。
 
-![图 1. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-1.png)
 
+<img width="1920" height="1080" alt="Image" src="https://github.com/user-attachments/assets/abab1345-a9fc-4de4-a130-ba30fe3fa3d5" />
 
 图 1. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -55,7 +55,8 @@ __Tom:__ 好的。首先，正如你刚才提到的——共享 buffer cache。�
 
 另一个值得一提的例子是，每个 session 都有自己的缓存——保留着它当前所需要的 catalog（系统目录）数据的副本。这对我们非常有帮助，因为它让我们能够以相当直接的方式应对"不同 session 对 catalog 的内容可能有不同视图"这一事实。举例来说，你可能有一个尚未提交的对表的 DDL 修改——比如增加一列。这在共享 catalog 缓存的架构下会相当难以处理。但在我们的世界里，拥有这个未提交修改的 session 可以在自己的缓存里看到它，而其他任何人都看不到。
 
-![图 2. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-2.png)
+
+<img width="1920" height="1080" alt="Image" src="https://github.com/user-attachments/assets/3efe9cc7-0f13-44b7-b604-dc92b285cde8" />
 
 图 2. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -67,7 +68,8 @@ __Tom:__ 我们（好像）并不允许把临时表转换成非临时表，反�
 
 __Elizabeth:__ 有一点会让人们对 Postgres 感到惊讶：虽然你可以有很多进程并发地写数据，每一个 INSERT、UPDATE 和 DELETE 都会并行生成 write-ahead log（WAL）记录，但只有一个进程能够执行崩溃恢复并重放这些记录。你能谈谈这背后的架构吗——恢复进程和 write-ahead log 是如何工作的，以及这对 WAL 系统的设计意味着什么？
 
-![图 3. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-3.png)
+
+<img width="1920" height="1080" alt="Image" src="https://github.com/user-attachments/assets/8eec3538-477d-4f07-9b64-0c28c44e38c8" />
 
 图 3. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -79,7 +81,7 @@ __Tom:__ 嗯，这样做的目的基本上是减少事务提交之前必须发�
 
 我们最终还是要同步那些表写入，但我们会一直等到 checkpoint 时才做，而 checkpoint 并不频繁发生。而且它是后台操作，你的事务提交不会干等着它发生。
 
-![图 4. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-4.png)
+<img width="960" height="540" alt="Image" src="https://github.com/user-attachments/assets/3d9f9653-c11c-45af-a81d-e612d1194c58" />
 
 图 4. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -93,7 +95,7 @@ __Tom:__ 是的。不过这又是一个我不具备深厚专业知识的实践�
 
 __Elizabeth:__ 我们一直在谈论"每个连接一个进程"（process-per-connection）。如果某个进程出了问题，它会自己死掉，不会拖垮其他任何 session。隔离性非常好。但我所处的世界里有很多繁忙的应用、成群的应用服务器、成千上万个连接同时访问同一个 Postgres 数据库。社区基本上已经通过 PgBouncer 之类的外部连接池解决了这个问题。你怎么看这种局面——崩溃隔离固然有益，但连接扩展会带来开销？当前的连接池方案是最好的方式吗，还是 Postgres 正在进行某种长期的架构变革？
 
-![图 5. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-5.png)
+<img width="960" height="539" alt="Image" src="https://github.com/user-attachments/assets/aacc7140-678e-4995-afc2-055d7e82023f" />
 
 图 5. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -129,7 +131,7 @@ __Tom:__ 我想指出的一点就是整个系统相对的简单性，而这正�
 
 __Elizabeth:__ Postgres 使用多版本并发控制（MVCC）来处理并发读写。当一行被更新时，Postgres 不会覆盖它，而是把一个全新的行副本连同行头中的事务元数据一起写入表中。读操作在写发生期间看到的是旧版本。最终你会留下旧的死行，由 VACUUM 清理。其他数据库的工作方式不同，它们有某种 undo log。从架构上你怎么看 MVCC？你觉得这是一个好方法吗，还是有讨论要换一种做法？
 
-![图 6. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-6.png)
+<img width="960" height="542" alt="Image" src="https://github.com/user-attachments/assets/5da3bd77-19d9-4206-a788-32f915d0dbc7" />
 
 图 6. 与 Tom Lane 畅谈 Postgres 30 年
 
@@ -157,7 +159,8 @@ __Elizabeth:__ 我知道你自己就做了不少查询规划器（query planner�
 
 __Tom:__ 嗯，正如你所说，它基本上会考虑一大堆不同的执行策略，并试图根据其成本模型选出最便宜的那一个。所以第一个坑当然是：成本模型并不总是符合现实。第二个坑是，一旦 join 的表数量超过一定限度，可能的执行计划数量就会呈指数级增长。
 
-![图 7. 与 Tom Lane 畅谈 Postgres 30 年](images/figure-7.png)
+
+<img width="960" height="540" alt="Image" src="https://github.com/user-attachments/assets/bdfd3365-ec88-42fa-ba41-6adaa18aa741" />
 
 图 7. 与 Tom Lane 畅谈 Postgres 30 年
 
