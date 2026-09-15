@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark_colorblind" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta name="keywords" content="PostgreSQL, PG, 数据库, DBA, 源码分析, 性能优化">
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='/assets/primer.css' rel='stylesheet' />
+    <script src='/assets/GmeekVercount.js' defer></script><!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0b6ae8ab0b62429282f90823ed2927a0"}'></script><!-- End Cloudflare Web Analytics -->
+    <script src="/assets/icons.js"></script>
+    <link rel="icon" href="/PostgreSQL_logo.3colors.svg">
+    <link rel="alternate" type="application/rss+xml" title="PG Internal" href="https://pg-internal.com/rss.xml">
+    <link rel="canonical" href="https://pg-internal.com/post/Tom-Lane-tan-su-zao-Postgres-san-shi-nian-jia-gou-de-na-xie-jue-ce.html"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="探索 Postgres 30 年的架构历程——与核心 committer Tom Lane 对话，聊聊进程隔离、MVCC、write-ahead logging（WAL）与线程。">
+<meta property="og:title" content="Tom Lane 谈塑造 Postgres 三十年架构的那些决策">
+<meta property="og:description" content="探索 Postgres 30 年的架构历程——与核心 committer Tom Lane 对话，聊聊进程隔离、MVCC、write-ahead logging（WAL）与线程。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://pg-internal.com/post/Tom-Lane-tan-su-zao-Postgres-san-shi-nian-jia-gou-de-na-xie-jue-ce.html">
+<meta property="og:image" content="https://pg-internal.com/avatar.jpg">
+<title>Tom Lane 谈塑造 Postgres 三十年架构的那些决策</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Tom Lane \u8c08\u5851\u9020 Postgres \u4e09\u5341\u5e74\u67b6\u6784\u7684\u90a3\u4e9b\u51b3\u7b56","description":"\u63a2\u7d22 Postgres 30 \u5e74\u7684\u67b6\u6784\u5386\u7a0b\u2014\u2014\u4e0e\u6838\u5fc3 committer Tom Lane \u5bf9\u8bdd\uff0c\u804a\u804a\u8fdb\u7a0b\u9694\u79bb\u3001MVCC\u3001write-ahead logging\uff08WAL\uff09\u4e0e\u7ebf\u7a0b\u3002","datePublished":"2026-09-15","url":"https://pg-internal.com/post/Tom-Lane-tan-su-zao-Postgres-san-shi-nian-jia-gou-de-na-xie-jue-ce.html","author":{"@type":"Person","name":"PGStone"}}
+</script>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.7;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+.postMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--color-fg-muted);
+}
+.postMeta .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.postMeta .Label {
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 2em;
+}
+.postNav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border-default);
+}
+.postNav a {
+    max-width: 48%;
+    text-decoration: none;
+    color: var(--color-fg-default);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+}
+.postNav a:hover {
+    border-color: var(--color-accent-fg);
+}
+.postNav .nav-label {
+    font-size: 12px;
+    color: var(--color-fg-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+.postNav .nav-title {
+    font-size: 14px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.postNav .nav-next {
+    text-align: right;
+    margin-left: auto;
+}
+@media (max-width: 600px) {
+    .postNav {
+        flex-direction: column;
+    }
+    .postNav a { max-width: 100%; }
+    .postNav .nav-next { text-align: left; }
+}
+.snippet-clipboard-content.has-line-numbers {
+    display: flex;
+}
+.snippet-clipboard-content.has-line-numbers pre {
+    flex: 1;
+    min-width: 0;
+}
+.line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    text-align: right;
+    color: var(--color-fg-muted);
+    opacity: 0.6;
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--color-border-muted);
+    margin-right: 12px;
+    padding-right: 8px;
+    flex-shrink: 0;
+}
+.line-numbers span {
+    display: block;
+    line-height: 20px;
+}
+#postBody img {
+    cursor: zoom-in;
+    transition: transform 0.2s;
+}
+#postBody img:hover {
+    transform: scale(1.02);
+}
+.lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+}
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    border-radius: 4px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">Tom Lane 谈塑造 Postgres 三十年架构的那些决策</h1>
+<div class="title-right">
+    <a href="https://pg-internal.com" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/swrd/swrd.github.io/issues/18" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="postMeta">
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7v7.25c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7H2.5Zm0-1.5h11V3.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25V5.5Z"/></svg>
+        2026-09-15
+    </span>
+    
+    <span class="meta-item">
+        <svg class="octicon" width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M3.25 1A2.25 2.25 0 0 1 5.5 3.25v.5a.75.75 0 0 1-1.5 0v-.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v9.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0v.5A2.25 2.25 0 0 1 3.25 14h-.5A2.25 2.25 0 0 1 .5 11.75v-9.5A2.25 2.25 0 0 1 2.75 1h.5Zm8.5 0A2.25 2.25 0 0 1 14 3.25v9.5A2.25 2.25 0 0 1 11.75 15h-.5A2.25 2.25 0 0 1 9 12.75v-.5a.75.75 0 0 1 1.5 0v.5c0 .414.336.75.75.75h.5a.75.75 0 0 0 .75-.75v-9.5a.75.75 0 0 0-.75-.75h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0v-.5A2.25 2.25 0 0 1 11.75 1h.5Z"/></svg>
+        约 60 分钟
+    </span>
+    
+    
+    <span class="Label" style="background-color:#7d638e">参访</span>
+    
+</div>
+<div class="markdown-body" id="postBody"><blockquote>
+<p>探索 Postgres 30 年的架构历程——与核心 committer Tom Lane 对话，聊聊进程隔离、MVCC、write-ahead logging（WAL）与线程。</p>
+</blockquote>
+<p>我们正在庆祝 Postgres 诞生 30 周年。我们借此机会与项目的主要开发者之一 Tom Lane 坐了下来，聊了聊那些获得回报的架构押注、早期的混乱岁月，以及 Postgres 在云与 AI 时代的下一步。</p>
+<p>本次访谈也提供<a href="https://youtu.be/2ajXkLeVXxQ" rel="nofollow">视频版本</a>。</p>
+<p>PostgreSQL 正在庆祝它作为开源项目的 30 周年。我与 Tom Lane 坐了下来——他是核心团队成员，并在其中的 25 年里担任 committer。我们聊了聊在过去三十年中塑造这个项目的技术与架构决策。</p>
+<p>正如你在本次访谈中将会看到的，Postgres 的架构与社区在过去三十年中始终保持稳定。虽然许多方面得到了改进、特性不断完善，但整体而言，它仍是我们最初起步时的那个数据库项目。核心目标从未改变：不丢失数据、尽可能快地从崩溃中恢复，并通过扩展和新特性满足现代业务的需求。</p>
+<h2>开场</h2>
+<p><strong>Elizabeth:</strong> 我知道在这 30 年里，你大约有 25 年都是 Postgres 的核心 committer。对于不认识你的人，能否描述一下在 2026 年的今天，你日常参与这个项目的工作是什么样的？</p>
+<p><strong>Tom:</strong> 嗯，看起来和 90 年代没什么太大不同。我是说，这一直是一个相当依赖邮件驱动的项目，现在依然是。所以我想我大概三分之一的时间在读写邮件，三分之一的时间在评审别人的补丁，另外三分之一的时间在做我自己的补丁。当然，每天的情况差别很大，但大致就是这么个节奏。</p>
+<p><strong>Elizabeth:</strong> 而你是 100% 全职投入核心 Postgres 的，对吧？除了参与核心项目之外，你没有其他活动？</p>
+<p><strong>Tom:</strong> 是的。</p>
+<p><strong>Elizabeth:</strong> 我准备了一些很深入的技术问题，不过为了让我们先热热身，先来几个小问题，你可以用非常简短的回答来应付，就当图个乐。你的 IDE 是什么？你用什么做核心开发工作？</p>
+<p><strong>Tom:</strong> Emacs。</p>
+<p><strong>Elizabeth:</strong> 你在工作时会查阅 Postgres 文档或代码注释吗？还是说所有东西都已经装在你脑子里了？</p>
+<p><strong>Tom:</strong> 不，我经常查文档，查代码更多，因为代码注释里有大量信息从未进入文档。我脑子里大致知道代码树里每样东西在哪儿，所以很多时候用这种方式找东西比在文档里找快得多。</p>
+<h2>进程 vs. 线程</h2>
+<p><strong>Elizabeth</strong>: 当你连接到 Postgres 时，系统会专门为你启动一个完全独立的操作系统进程：你有自己的查询执行器私有副本、自己的内存空间，与其他连接相互隔离。而 MySQL、SQL Server 或 Oracle 等其他数据库使用线程，所有连接共享进程、共享内存空间。对于深入 Postgres 内部机制的人来说，这是一个常见的讨论话题。Postgres 从这种隔离中获得了哪些线程模型给不了的东西？又有哪些取舍？</p>
+<p><strong>Tom:</strong> 嗯，我认为我们从中得到的主要是代码的简洁性。当你写一段直线式的代码时，不必担心某个其他线程会不会在中途篡改你的数据结构。共享内存中的某些数据确实需要考虑这个问题，但这实际上只占系统整体数据集的一小部分。</p>
+<p>此外在抗崩溃性方面也有一些好处，因为如果某个 session 进程发疯崩溃了，我们不必担心它破坏了 postmaster 的某些状态——所以我们可以直接重启系统，并且确信我们处理的数据仍然是完好的。</p>
+<p>所以这肯定有优势，但也有劣势，我想我们稍后会谈到。目前有人在研究转换成线程模型，但那涉及巨大的工作量，我也说不准最终能不能成。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-1.png"><img loading="lazy" src="images/figure-1.png" alt="图 1. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 1. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Elizabeth:</strong> 对于这场讨论，你有什么特别的看法吗？你喜欢我们目前的模式吗？或者你现在是如何看待这个问题的？</p>
+<p><strong>Tom:</strong> 我并没有深度参与让系统线程化的工作；其他人在这上面承担了大部分重活。显然，这会涉及一系列不同的权衡取舍，以及不同的优势和劣势，但我们当然应该继续推进这项工作，看看能否取得比现在更好的成果。</p>
+<h2>内存模型</h2>
+<p><strong>Elizabeth:</strong> 因为每个连接都是独立的进程，每个 backend 都有自己的一块内存。然后还有所有 backend 都能看到的共享内存——buffer cache、锁表和事务相关的东西。你能更深入讲讲共享区域与私有区域的划分，以及这如何塑造系统对不同部分内存的处理方式吗？</p>
+<p><strong>Tom:</strong> 好的。首先，正如你刚才提到的——共享 buffer cache。普通表的所有数据在被处理时，都位于那个共享缓存中。因此每个 session 看到的任何一个页面的视图都是相同的，这对于保证数据的正确性至关重要，原因显而易见。</p>
+<p>另一方面，临时表位于每个 session 本地的 buffer 中，这就是为什么你不能对另一个 session 的临时表做任何操作。但作为回报，我们在处理临时表数据时不必担心加锁。所以这里有一些性能上的优势，也有一些劣势，比如你不能依靠后台的 vacuum 来清理你的临时表。</p>
+<p>另一个值得一提的例子是，每个 session 都有自己的缓存——保留着它当前所需要的 catalog（系统目录）数据的副本。这对我们非常有帮助，因为它让我们能够以相当直接的方式应对"不同 session 对 catalog 的内容可能有不同视图"这一事实。举例来说，你可能有一个尚未提交的对表的 DDL 修改——比如增加一列。这在共享 catalog 缓存的架构下会相当难以处理。但在我们的世界里，拥有这个未提交修改的 session 可以在自己的缓存里看到它，而其他任何人都看不到。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-2.png"><img loading="lazy" src="images/figure-2.png" alt="图 2. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 2. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Elizabeth:</strong> 这非常有意思。跟我说说临时表吧——它们是什么、如何创建的。我更多是在数据加载场景中使用它们，很少在事务里用。</p>
+<p><strong>Tom:</strong> 我们（好像）并不允许把临时表转换成非临时表，反过来也不行。但它非常简单——你只需使用 CREATE TEMP TABLE，除此之外和 CREATE TABLE 完全一样。表的内容与你的 session 同生共死，除非你把它 drop 掉。当你退出 session 时，里面可能存在的任何东西都会被自动 drop。它基本上就是为那些"session 结束后你就不再关心"的瞬态数据而设的。</p>
+<h2>WAL 与崩溃恢复</h2>
+<p><strong>Elizabeth:</strong> 有一点会让人们对 Postgres 感到惊讶：虽然你可以有很多进程并发地写数据，每一个 INSERT、UPDATE 和 DELETE 都会并行生成 write-ahead log（WAL）记录，但只有一个进程能够执行崩溃恢复并重放这些记录。你能谈谈这背后的架构吗——恢复进程和 write-ahead log 是如何工作的，以及这对 WAL 系统的设计意味着什么？</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-3.png"><img loading="lazy" src="images/figure-3.png" alt="图 3. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 3. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Tom:</strong> 嗯，这样做的目的基本上是减少事务提交之前必须发生的磁盘写入量。思路是：任何时候你要更新表、索引或其他对象中的某个页，在真正于共享 buffer 中做出修改之前，你必须先向 write-ahead log 发出一条记录，说明你即将做什么。</p>
+<p>然后你再去执行修改。如果系统在这个改动落盘之前崩溃了，那么在恢复期间，我们可以从 WAL 日志中重放并重新应用这个改动。关键在于：与其让待写入的数据可能散布在所有表和所有索引之间，你得到的只是一条必须写出并提交的数据流。</p>
+<p>一旦你确认 WAL 数据已经落盘，你就可以安全地提交事务，即使共享 buffer 里可能还有一大堆尚未写出的其他数据。所以这基本上就是为了让磁盘 I/O 系统的日子更好过一些。</p>
+<p>我们最终还是要同步那些表写入，但我们会一直等到 checkpoint 时才做，而 checkpoint 并不频繁发生。而且它是后台操作，你的事务提交不会干等着它发生。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-4.png"><img loading="lazy" src="images/figure-4.png" alt="图 4. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 4. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Elizabeth:</strong> 我常听说人们通过调整 checkpoint timeout 来管理 I/O。</p>
+<p><strong>Tom:</strong> 是的。不过这又是一个我不具备深厚专业知识的实践问题。我知道它的工作原理，但我不知道把参数设在哪里最合适。</p>
+<p>你提到了重放只有单个进程这一点。我认为这一部分是因为还没人顾得上做，另一部分也是因为想让这个机制尽可能保持简单。我们希望确保系统一定能恢复，所以我们不希望重放路径里潜藏任何 bug。也许将来它会并行化，但我认为目前没有人在积极做这件事。</p>
+<h2>连接扩展</h2>
+<p><strong>Elizabeth:</strong> 我们一直在谈论"每个连接一个进程"（process-per-connection）。如果某个进程出了问题，它会自己死掉，不会拖垮其他任何 session。隔离性非常好。但我所处的世界里有很多繁忙的应用、成群的应用服务器、成千上万个连接同时访问同一个 Postgres 数据库。社区基本上已经通过 PgBouncer 之类的外部连接池解决了这个问题。你怎么看这种局面——崩溃隔离固然有益，但连接扩展会带来开销？当前的连接池方案是最好的方式吗，还是 Postgres 正在进行某种长期的架构变革？</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-5.png"><img loading="lazy" src="images/figure-5.png" alt="图 5. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 5. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Tom:</strong> 是的，这当然一直有人在思考。这里有一个不太光彩的小秘密：如果一个进程崩溃了，我们照样会把其他所有进程全部干掉，因为我们无法完全确定那个进程在真正失败之前没有把共享内存里的某些东西弄坏。</p>
+<p>所以实际发生的事情是：postmaster 会杀死它的所有其他子进程，并生成一份全新的共享内存，然后才允许任何新的子进程启动。因此从崩溃恢复的角度来看，我们真正需要做的只是把 postmaster 保留为一个单独的进程。我们完全可以让所有实际工作由一个大进程内的线程来完成，从崩溃恢复的角度看不会有任何区别。</p>
+<p>要走到那一步，我们必须解决的关键难题就是我在前面暗示过的那些——如果我们能支持多得多的 session 当然好，但困难在于每个 session 都有一些 catalog 缓存。在这些缓存里积累起足够的数据之前，这个 session 并不快，因为每次它想了解某个新事实时，都得去查 catalog。</p>
+<p>正因为如此，一旦一个 session 把缓存填充得不错，它就准备好干活了。它算是一个相当重量级的对象，你不会想立刻把它杀掉。这就是为什么人们最终落到了"连接池"这个方案上：把同一个 backend 进程不断复用，为属于不同应用线程的不同查询服务。</p>
+<p>要越过这一点，我们就必须解决"如何在多个对相关数据持有不同认识的 session 之间共享缓存"的问题。人们正在研究这个问题，但它相当棘手，我不确定我们离解决方案有多近。</p>
+<h2>线程化与现代硬件</h2>
+<p><strong>Elizabeth:</strong> 现在的服务器规模如此庞大。在一个大型实例中看到 128 或 256 个 CPU 核心已经很常见。对于线程化和现代硬件，你认为最终目标或方向是什么？</p>
+<p><strong>Tom:</strong> 嗯，启动一个带有 100 或 200 个活跃 backend 进程的系统当然没问题，只要内存够用，它就运行得相当好，因为每个 session 都需要相当多的工作内存。不过如今的服务器实在太庞大了，这已经算不上什么大问题。</p>
+<p>真正会让你吃苦头的，是当你想运行比那更多的 session 时，往往是上下文切换（context swap）时间。因为每个 session 都有自己的内存映射，你必须把它加载进 CPU 的缓存。</p>
+<p>切换到线程模型的希望在于，由于所有线程共享同一个地址空间，我们可以略微减少那部分开销。所以能走到那一步肯定是有吸引力的，但这需要我们花上一段时间。</p>
+<h2>Postgres 成功的原因</h2>
+<p><strong>Elizabeth:</strong> 退一步讲，你觉得这些架构选择中，究竟是什么让 Postgres 从一个很小的学术数据库项目变成了市场上最受欢迎的关系型数据库？</p>
+<p><strong>Tom:</strong> 我想指出的一点就是整个系统相对的简单性，而这正源于诸如"没有尝试使用线程"之类的选择。这并不是我们有意识的选择。90 年代末我们刚开始开发这个系统时，考虑使用线程根本不现实，因为线程当时没有很好地标准化，我们感兴趣的每个平台的做法都略有不同。显然这在过去 20 年里已经改变了，但在当时，这是让人连想都不敢想的巨大障碍。但它为我们换来了大量的简洁性，这意味着人们不需要太多背景知识就能上手为这个系统工作，这对我们帮助巨大。</p>
+<p>我认为另一个堪称跨越式台阶的东西是：当我们从 Berkeley 拿到代码时，它根本没有 write-ahead log。一旦崩溃，你经常面临的就是用手头仅有的备份重新初始化数据库。所以把 WAL 加进去，我认为这对我们的可靠性产生了巨大的影响，也让我们更有底气说服人们相信它可用于生产环境。</p>
+<h2>MVCC 的取舍</h2>
+<p><strong>Elizabeth:</strong> Postgres 使用多版本并发控制（MVCC）来处理并发读写。当一行被更新时，Postgres 不会覆盖它，而是把一个全新的行副本连同行头中的事务元数据一起写入表中。读操作在写发生期间看到的是旧版本。最终你会留下旧的死行，由 VACUUM 清理。其他数据库的工作方式不同，它们有某种 undo log。从架构上你怎么看 MVCC？你觉得这是一个好方法吗，还是有讨论要换一种做法？</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-6.png"><img loading="lazy" src="images/figure-6.png" alt="图 6. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 6. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p><strong>Tom:</strong> 不，我认为它从根本上是一个好设计。原因恰恰在于：那些你必须做的维护工作确实被推到了后台进程里，不会干扰人们真正想完成的工作。</p>
+<p>在基于 undo 的系统中，比如你要中止（abort）一个事务，就必须先回去重放那段 undo。所以只要你一切顺利提交，代价还不算大。但问题依然存在：你如何在不阻塞别人的情况下呈现一致的数据快照？</p>
+<p>所以我认为这是一个好设计，因为它把大量维护工作推给了后台进程。显然，我们在 vacuum 上已经投入了大量的工程精力，并且还会继续投入。但我觉得，如果没有它，我们也只是需要换一种方式在别处解决同样的问题。</p>
+<p><strong>Elizabeth:</strong> 我记得 Postgres 19 会有并行 vacuum，对吧？</p>
+<p><strong>Tom:</strong> 这倒是新鲜事。我没有密切关注它。不过，比如说，Melanie 在 vacuum 上做了很多工作。</p>
+<p>但我记得大概在 2000 年前后的一次谈话——在一次展会上有个人走过来找我，他显然是一位非常资深的 Oracle 专家。他对我说："你们做对了，我们做错了。"我一直很爱听这种话。</p>
+<p>也许他是在恭维我，谁知道呢？但不管怎样，我对这个方向并没有不满。这就是我们拥有的东西，它运行得相当好，而且我们知道如何继续改进它。</p>
+<p><strong>Elizabeth:</strong> 我认为 autovacuum 也功不可没——它不再需要用户自行设置 vacuum 进程。现在 Postgres 基本上会替你把这一切都做好，除非你的数据库非常大或有特殊情况。</p>
+<p><strong>Tom:</strong> 是的，那是另一个我们投入了大量工作去调整 autovacuum 启发式规则、让它知道何时该 vacuum 的领域。这项工作还在继续。但总体而言，我认为它相当成功。</p>
+<h2>Postgres 查询规划器</h2>
+<p><strong>Elizabeth:</strong> 我知道你自己就做了不少查询规划器（query planner）方面的工作。当你写一条 SQL 查询时，Postgres 的查询规划器会尝试很多不同的执行策略——它决定是扫描整张表还是使用索引，是想要 nested loop 还是 hash join 或 merge join，以及 join 中表的顺序。它运用了大量的内部统计信息和成本模型来挑选正确的查询计划。这正是让 Postgres 成为 Postgres 的原因之一。你能带大家从较高的层面看看查询规划器是如何工作的、它的复杂之处在哪里，以及你眼中未来的工程工作方向吗？</p>
+<p><strong>Tom:</strong> 嗯，正如你所说，它基本上会考虑一大堆不同的执行策略，并试图根据其成本模型选出最便宜的那一个。所以第一个坑当然是：成本模型并不总是符合现实。第二个坑是，一旦 join 的表数量超过一定限度，可能的执行计划数量就会呈指数级增长。</p>
+<p><a target="_blank" rel="noopener noreferrer" href="images/figure-7.png"><img loading="lazy" src="images/figure-7.png" alt="图 7. 与 Tom Lane 畅谈 Postgres 30 年" style="max-width: 100%;"></a></p>
+<p>图 7. 与 Tom Lane 畅谈 Postgres 30 年</p>
+<p>所以到了那个时候，我们只能退而求其次，用启发式方法搜索计划空间的一部分——这有时会导致我们找不到好的计划。这意味着我们始终致力于改进成本模型，并不断寻找缩短计划器执行时间的方法。而这两个目标在某种程度上是相互冲突的。所以这里面涉及大量的复杂工程权衡——如何在合理的时间内获得良好的查询计划。而这种复杂性正是我觉得它有趣的地方。</p>
+<p><strong>Elizabeth:</strong> 对于查询规划器的重大更新，你有近期或远期的计划吗，还是说更多是较小的迭代式工作？</p>
+<p><strong>Tom:</strong> 我目前没有在做这方面的大动作。一些其他人已经站了出来——比如 David Rowley、Richard Guo——他们在那个领域做着重要的工作，这很棒。不过，它依然是我的挚爱，如果我有机会参与其中，我一定会去做。</p>
+<h2>C 与内存上下文</h2>
+<p><strong>Elizabeth:</strong> Postgres 大约有 150 万行 C 代码——一个庞大的代码库，而不是独立的模块。项目没有使用标准的 C 语言模式，而是使用内存上下文（memory context）：你把内存分配到一个与查询或事务绑定的命名上下文树中，当这个工作单元结束时，整棵上下文树一起被释放。工程圈子里有很多关于 Rust 和内存安全语言的讨论。你怎么看内存上下文模式作为编译器强制内存安全的替代方案？你认为 Postgres 会继续作为一个大型的 C 项目存在吗，还是有兴趣重写某些部分或将其拆分？</p>
+<p><strong>Tom:</strong> 我没看到多少人对重写它感兴趣。大约 20 年前我们有过一些讨论，比如是否用 C++ 重写。我们探索过一点点，最后认定性价比并不高。我不确定如今有了新的选择后，情况是否更好。</p>
+<p>关于 memory context——需要理解的是，整个系统遍布着不同生命周期的上下文。有些贯穿一个 session 的整个生命周期，有些与一条查询同生共死，还有一些在查询内每处理一行就被重置一次。</p>
+<p>一般来说，关键在于尽可能在生命周期最短的上下文中分配资源。假设你能做到这一点，基本上就不用担心内存泄漏了，因为即使你忘记清理，那些遗漏的资源也会在合理的时间内自动释放。</p>
+<p>事实上，在我们的代码里，逐个释放（retail freeing）内存有点像是一种反模式，因为上下文清理比逐个释放该上下文里的每个对象高效得多——而且健壮得多，因为即使你忘记释放某些东西，它仍然会被清理掉。</p>
+<p>这种方式的缺点在于，如果你的工作环境需要长时间运行，那么忘记释放内存就会造成严重后果。而且我们经常会把这种方式带到不适用的地方，然后就出现了内存泄漏的 bug，不得不去修复。所以，这种方式肯定有它的弊端，但它确实非常符合我们的需求。</p>
+<p>我觉得这个概念是我提出的，或者至少是其中很大一部分。所以我可能有点偏颇。但我认为它确实有效。</p>
+<p>除了"在真正要紧的地方泄漏"这个问题之外，还有另一个问题：如果你在一个上下文里构建了一个数据结构，它含有指向另一个上下文中寿命更短的数据结构的指针，那就会有悬空指针（dangling pointer）问题。所以这当然并非完美无缺，但它非常契合我们的问题，而我真的不相信语言强制的内存安全模型对我们能同样好用。我没有实际花时间研究过，所以不能百分百肯定——但我对此持怀疑态度。</p>
+<h2>扩展</h2>
+<p><strong>Elizabeth:</strong> 我想稍微聊聊 Postgres 扩展的世界。现在开发者们普遍认为 Postgres 几乎无所不能——“直接用 Postgres 就行了”。你可以把它用作key-value 存储，可以用 LISTEN/NOTIFY 消息队列，可以把它变成作业调度器，可以把它变成文档数据库。它能做的事情数不胜数。而他们的宣传口号是：既然一个 Postgres 就能搞定一切，为什么还要运行五个不同的数据系统呢？作为专注于这个核心数据库的人，你喜欢这种多功能性吗？你觉得这令人兴奋，还是担心人们正在把 Postgres 的使用推向它原本设计用途之外？</p>
+<p><strong>Tom:</strong> 嗯，可扩展性从一开始就是这个项目设计理念的一部分。伯克利的工程师们在设计之初就考虑到了添加新的数据类型。他们还设想可以添加新的索引访问方法，构建新的索引类型。</p>
+<p>从那以后，我们在此基础上继续发展，并添加了其他扩展系统的方法。例如，如果一项提议的功能仅适用于核心数据类型，而无法扩展到扩展数据类型，我们可能不会接受它。我们会建议你先思考如何扩展这项功能，然后再提交。</p>
+<p>我认为这种理念对我们吸引那些希望围绕 Postgres 核心数据库进行开发的人非常有帮助。所以，我认为我们拥有这种思维方式是项目成功的关键因素之一。是的，我绝对赞同这种做法。当然，关系型数据库确实有一些不适用的任务，但人们经常发现 Postgres 已经足够好了。这样一来，他们就省去了集成其他工具集的麻烦——这在很多方面都很方便。</p>
+<p>例如，你提到了 LISTEN/NOTIFY——它是一种简单有效的信令机制，但扩展性不太好。所以，如果你需要传递大量消息，就必须寻找其他方案。但对于很多应用来说，它已经足够用了。</p>
+<h2>解析器的可扩展性与扩展的局限</h2>
+<p><strong>Elizabeth:</strong> 我们来谈谈扩展在 Postgres 自身内部是如何工作的。你可以添加新的数据类型、新的索引类型、新的操作符。你甚至可以把过程语言放进 Postgres。而且你可以在不触碰核心 Postgres 引擎的情况下，通过构建扩展做到这一切。但据我所知，扩展不能修改 SQL 解析器。所以如果你想要一个新关键字、一个新子句，那就是对核心 Postgres 的补丁。而把补丁合入核心 Postgres 是一个相当大的工程——甚至可能是在大版本发布中经历多年的评审周期。像 pgvector 这样的 AI embedding 扩展，完全是通过现有的 SQL 语法来实现一切的。大家怎么看待这条界线？有没有关于让解析器部分可扩展的讨论？</p>
+<p><strong>Tom:</strong> 是的。所以这基本上要追溯到我们使用 Flex 和 Bison 来构建解析器的事实。这些工具读取语法的静态描述，构建一些解析表，然后这些解析表会被编译到服务器端。就是这样。你无法动态地更改它。</p>
+<p>原则上我并不反对可扩展解析器。事实上，早在 70 年代 Postgres 出现之前，我就参与过类似系统的开发。但我从那段经历中了解到，构建可扩展解析器比你想象的要难得多。Bison 的优点在于，如果你的语法存在歧义，它会直接指出并引导你进行修正。这样就不会出现运行时意外情况，比如，你根本无法访问到某个行为，因为它被其他存在歧义的语法掩盖了。</p>
+<p>所以，如果我们找到了另一个我们想要研究的、可扩展的工具，我会提出一些棘手的问题，比如我们如何才能获得类似的正确性保证。</p>
+<p>Bison 的另一个优点是它很容易上手——文档齐全，调试完善，而且免费，几乎可以在任何平台上使用。我不知道目前还有哪些同类工具具备这些优势。但正如你所说，它的可扩展性确实存在不足。所以，如果能找到更好的替代方案，我非常乐意。</p>
+<h2>Tom Lane 的 Postgres 之路</h2>
+<p><strong>Elizabeth:</strong> 在今天和你聊天之前，我做了一些调查。网上似乎都说你最初参与 Postgres 项目是因为需要一个数据库来存储股票交易信息，你一开始只是个用户和 bug 报告员，后来提交了一些补丁，最终成为了核心提交者。如果这个说法不属实，请随时纠正。那么，你的职业生涯是如何发展起来的呢？你当初第一次看到这个项目时，是否就预料到自己会投入 30 年的时间和精力去研究它呢？</p>
+<p><strong>Tom:</strong> 不，我完全不知道。嗯，故事基本属实。我需要一个数据库，但我们不想花钱买 Oracle。当时比较合理的选择是 Postgres 和 MySQL，我看了 MySQL 的代码库，然后决定不想跟它有任何瓜葛。</p>
+<p><strong>Elizabeth:</strong> 这个我等会儿得追问一下。</p>
+<p><strong>Tom:</strong> 我看了 Postgres 的代码库，感觉它的结构好得多。所以我们就开始用它，很快就遇到了一些 bug，需要提交修复程序，然后项目就慢慢发展起来了</p>
+<p>在那之前，我对数据库一窍不通。读研究生的时候，我的教授们对数据库也毫不关心。所以，当我发现数据库背后其实蕴藏着许多有趣的问题时，我感到非常兴奋，并逐渐沉迷其中，越做越投入。</p>
+<p><strong>Elizabeth:</strong> 哦，这太有趣了。你是在 Postgres 从加州大学伯克利分校开源出来几年后才开始参与这个项目的。你刚开始接触它的时候，Postgres 是什么样的？当时你意识到有哪些重大问题需要改进吗？</p>
+<p><strong>Tom:</strong> 系统的框架很好。如果不是这样，我们不可能走到今天。但是，确实有一大堆琐碎的小 bug 需要我们去识别和修复。那段时期花了好几年，才真正达到可以说系统几乎没有漏洞的程度。</p>
+<p>至于重大功能，那些年里我觉得唯一缺失的就是崩溃恢复。我们已经谈过了，write-ahead log 机制解决了这个问题。除此之外，贯穿我参与以来的另一个主题就是不断地榨取越来越多的性能。</p>
+<p><strong>Elizabeth:</strong> 当然。不过它当年的性能一定相当不错，所以你才会真的用它。你在早期就把 Postgres 用在了你当时的项目上吗？</p>
+<p><strong>Tom:</strong> 是的。我们确实把它用于一定量的股票交易。我们有一些市场模型，它们曾经有效，直到后来失效。那之后我们就退出了这个行业。</p>
+<h2>Postgres 为何能屹立 30 年</h2>
+<p><strong>Elizabeth:</strong> 过去 30 年里，数据库领域发生了翻天覆地的变化。那段时间里，许多其他流行的数据库要么销声匿迹，要么被其他项目收购。对于任何软件项目来说，能像 Postgres 一样保持 30 年的流行度都算是相当长的时间了。你认为 Postgres 早期做出的哪些决策，让它能够作为一个独立项目存活这么久？</p>
+<p><strong>Tom:</strong> 在我看来，毫无疑问，正是 Berkeley 制定的宽松许可条款，才使得人们可以随心所欲地使用它，甚至可以在此基础上创建专有分支。而且很多人确实这么做了。但关键在于，由于它是完全合法的，每个人都明白这一点，所以他们仍然与社区项目保持联系，并贡献自己的力量，因为他们更愿意在一个坚实的基础上继续发展。</p>
+<p>人们会在开发专有软件和参与社区项目之间来回切换。我认为早期很多工作基本上都是通过这种模式获得资金支持的，也就是在社区版 Postgres 的基础上销售产品。</p>
+<p>我想，另一个可以参考的类似项目是 Linux。他们走了不同的道路。显然，他们采用了 GPL 协议，这带来了一系列不同的权衡取舍，但同样，人们理解如何使用它，而且这并没有阻止人们为项目做出贡献。</p>
+<p><strong>Elizabeth:</strong> 我同意。我经常谈到 Postgres，而且我特别强调它的许可证，因为我认为这非常重要。很多人不仅能够为它做出贡献，还能基于它建立起整个业务。我认为，虽然 Linux 和 Postgres 的运行模式和许可证略有不同，但两者一路走来是互相成就的。Linux 在过去 30 年里一直保持着强劲的发展势头。Linux 作为操作系统的流行以及 Postgres 在 Linux 环境下的出色表现也是促成这一现象的重要因素。</p>
+<p><strong>Elizabeth:</strong> 你参与过许可证方面的工作吗？据我所知，Postgres 有自己的许可证，即 PostgreSQL 许可证，我认为它与 FreeBSD 许可证非常相似。</p>
+<p><strong>Tom:</strong> 是的，在我们看来——嗯，实际上研究这类问题的人告诉过我，它更像 MIT 许可证。虽然 BSD 许可证也是伯克利大学开发的，但它和 BSD 许可证并不完全一样。不过不管怎样，作为一个非法律人士，我对它的解读是：你可以对这些代码为所欲为，只要你不起诉我们。</p>
+<p><strong>Elizabeth:</strong> 我认为像 Amazon、Google 和 Microsoft 这样的大型云服务提供商能够围绕 Postgres 构建完整的业务，并以服务的形式出售 Postgres……我认为这也促进了它的普及，尤其是在我们现在所处的云计算世界。云计算领域没有规则可言。因此，许多人愿意付费托管 Postgres 并帮助用户运行它，这也进一步提升了它的受欢迎程度。</p>
+<h2>Tom 最喜欢和最不喜欢的版本与特性</h2>
+<p><strong>Elizabeth:</strong>  你最喜欢哪个 Postgres 版本？</p>
+<p><strong>Tom:</strong> 这可真难选。通常我最喜欢的版本是最新的。回想一下我们刚才的谈话，我觉得 8.0 版本算是巅峰之作，因为正如我们之前提到的，我们在这个版本中加入了 WAL 日志恢复功能。这标志着数据库从玩具变成了真正的专业数据库，向前迈出了一大步。不过反过来，我也可以告诉你我<em>最不</em>喜欢的版本：13，那个版本简直漏洞百出。我们之后好几年都在修复那些 bug。它绝对是我们问题最多的版本。</p>
+<p><strong>Elizabeth:</strong> 13 里有什么特别有问题的特性吗？</p>
+<p><strong>Tom:</strong> 万幸，大部分细节我已经忘了。</p>
+<p><strong>Elizabeth:</strong> 你有没有自己主笔的、让你特别自豪的某个特性？</p>
+<p><strong>Tom:</strong> 我把自己在 Postgres 上的工作看作是大量不太大的独立部件的累积。我可以挑出这个或那个，但它们单独听起来可能都不算什么大事。</p>
+<p><strong>Elizabeth:</strong> 如果明天你可以从 Postgres 中删除一个功能，而不用担心向后兼容性问题，你会怎么做？</p>
+<p><strong>Tom:</strong> 我不喜欢我们目前的分区（partitioning）的方式。我不知道怎样才能做得更好，但现在它很乱。</p>
+<h2>Tom 在 Postgres 之前的工作</h2>
+<p><strong>Elizabeth:</strong> 我了解你加入 Postgres 项目之前的一些经历。我想你曾参与过 JPEG（图像规范）的开发。网上有说法称你也参与过 libjpeg 的开发，libjpeg 是“毅力号”火星探测器相机项目的一部分。请你谈谈这方面的情况，以及这些经历如何影响你在 Postgres 的工作。</p>
+<p><strong>Tom:</strong> 我和 JPEG 规范的编写没有任何关系。但规范发布后，大约有十几个人对此感兴趣，于是决定坐下来写一个开源的实现，我们就这么做了，最终得到了 libjpeg。一开始，这个项目非常活跃，大概有十几个人参与其中。之后它就进入了维护模式。我担任了大约五年的主要维护者，这就是为什么我的名字比其他人的更常被提起。</p>
+<p>自从我开始研究 Postgres 之后，它就占据了我所有的时间。所以我停止了 libjpeg 的开发。我很高兴其他人接手并继续推进这个项目，毕竟在我搁置了这么久之后，他们最终做到了。</p>
+<p>我确切地知道“毅力号”火星车的工程相机使用的是 libjpeg 格式，因为 Joe Conway 找到了一篇学术论文证实了这一点。他们从未直接联系过我。</p>
+<p><strong>Elizabeth:</strong> 开放图像规范和数据库之间有交集吗？</p>
+<p><strong>Tom:</strong> 没有直接交集，但它确实影响了我对软件许可证之类问题的思考。我认为 JPEG 今天之所以无处不在，25% 的功劳在于它是一个非常出色的标准——它能让图像文件在同等质量下比以前小大约 10 倍——75% 的功劳在于有一个任何人都能使用的免费实现。没有后者，它就不会被塞进早期的网页浏览器，你也不会在网上到处看到它。</p>
+<p>我们在这件事上做出了正确的决定。后来当我再次接触 Postgres 时，它非常宽松的许可协议是吸引我的重要原因之一。</p>
+<p><strong>Elizabeth:</strong> 你是如何对开源理念产生兴趣的？显然你对协作式开源软件项目充满热情。你是在大学期间接触到这个领域的吗？你是什么时候开始对这个理念感兴趣的？</p>
+<p><strong>Tom:</strong> 我是 80 年代读研究生时接触到它的。如果你身处学术环境，显然到处都漂浮着没有人特别想主张版权的软件——人们更愿意分享、改进和使用。所以我在那时就接触到了那种思维方式。</p>
+<p>我具体投入其中的原因是：我刚读完我的 PhD，它很大程度上是由美国纳税人资助的，我觉得我需要做点什么来回报这个世界。所以我在找一个可以奉献给世界的开源项目，稍微偿还一下我对社会的亏欠。然后 libjpeg 出现了，我说：嗯，这看起来很有趣，我参与进来吧。</p>
+<p><strong>Elizabeth:</strong> 你的 PhD 研究的是什么？</p>
+<p><strong>Tom:</strong> 软件架构。论文的标题其实还有几个字，但基本上就是这个意思。</p>
+<h2>Postgres 的治理模式</h2>
+<p><strong>Elizabeth:</strong> 我想聊聊这个项目的运作方式和治理模型。它有点独特。大多数达到这个体量和规模的开源项目的运作方式都有所不同。它们可能有正式的基金会、有董事会、有某种企业赞助商。我想到的是 Apache 基金会、Linux 基金会、Python 软件基金会，以及 Kubernetes 背后的 CNCF 这类组织。Postgres 的运作方式则不太一样。据我所知，PostgreSQL Development Group 甚至不是一个正式的法律实体。它比其他一些大型项目更非正式一些，更自我遴选。你有一个核心团队、自我遴选的 committer，基本上一切都基于邮件。你甚至不能提交 pull request。Postgres 的代码在 Git 里，但那只是一个镜像。一切都在邮件里发生。你怎么看这个治理模型？</p>
+<p>我想稍微谈谈这个项目的运作方式和治理模式。它有点独特。大多数同等规模的开源项目运作方式都略有不同。它们可能有一个正式的基金会，一个理事会，或者一些企业赞助商。我想到了像 Apache 基金会、Linux 基金会、Python 软件基金会以及 Kubernetes 的 CNCF 这样的组织。Postgres 的运作方式并非如此。据我所知，PostgreSQL 开发组甚至不是一个正式的法律实体。它比其他一些大型项目更非正式一些。它更倾向于自我选择。它有一个核心团队，成员都是自愿提交的，而且基本上都是通过电子邮件沟通。你甚至不能提交 pull request。Postgres 的代码在 Git 上，但那只是一个镜像。所有事情都是通过电子邮件进行的。你对这种治理模式有什么看法？</p>
+<p><strong>Tom:</strong> 说实话，我不太清楚我们是怎么让它运作起来的。它在某种程度上是被项目最初的条件逼出来的。我们手上有 Berkeley 随手扔过来的这么一大块代码。我们不拥有它。我们不能修改许可证。我们讨论过这件事，最终认定我们根本没有权利修改许可证，因为在那个时候我们不是代码的原始作者或主要作者。</p>
+<p>所以你只能接受这个许可协议。我们有一群贡献者，他们之间互不隶属，都为不同的人工作。因此任何形式的强力治理模型都行不通，人们会拂袖而去。</p>
+<p>所以我们从来没有正式的组织架构。一开始，核心团队就是那些拥有并运行我们 CVS 服务器的人，因此他们有权决定是否发布提交信息。但这种情况并没有持续太久。不久之后，我们就成立了一个独立的基础设施团队。所以现在核心委员会没有任何正式的权力。大家之所以会听我们的，是因为他们一直以来都是这样。但我不太确定，如果我们真的就项目的运作方式发生一场激烈的争论，会发生什么。但不知怎么的，这个项目已经维持了 30 年，我真的不明白它是怎么做到的。</p>
+<p><strong>Elizabeth:</strong> 我认为参与这个项目的大多数人都相当忠于 Postgres 本身。如果你不是想让项目变得更好，你就不会去写补丁。Postgres 的更新速度并不快。大型补丁需要数年才能合并，即使是小型补丁也可能需要数年。但我认为这在某种程度上为项目创造了稳定性，因为它不会去追下一个最新潮的东西，也不会因为某个人或某家公司的利益就重写一部分代码。这种"大家意见一致"式的模型带来了极大的稳定性。</p>
+<p><strong>Tom:</strong> 我觉得这在某种程度上是必然的。人们希望他们的数据库是无聊的。当他们把数据放进去时，他们希望明天还能把数据取出来。而需求的变化并没有那么快。每五到十年，SQL 委员会就会发布一个新版本的标准，其中包含一些新内容，我们会看看，也许会考虑实现，也许不会。但实际上并没有什么事情促使我们急于做出改变。就我们目前的工作而言，这很好。</p>
+<h2>Postgres 的未来</h2>
+<p><strong>Elizabeth:</strong> 您认为 Postgres 的未来发展方向是什么？我们之前讨论过治理模式，一些规模如此之大的项目可能会有路线图或指导委员会，但 Postgres 目前还没有。我们也简单聊了聊线程。Postgres 核心功能中是否还会有其他重大变革？很多人都在问备份和高可用性之类的问题。您是否考虑在 Postgres 中实现更多这类功能？</p>
+<p><strong>Tom:</strong> 就像我说的，我们没有项目路线图。这主要是因为在项目初期，没有人可以指挥别人做什么。如果你想完成任何事情，就必须说服别人你的想法是好的，然后他们才有可能参与进来并帮助你。我们仍然沿用这种方式。当然，现在有些人受雇于公司，公司可以告诉他们该做什么，但如果他们想让自己的想法最终被纳入社区代码库，仍然需要说服其他人。</p>
+<p>我们之前已经讨论过线程以及出于性能考虑而需要它的原因。另一个我认为持续了一段时间的问题是，人们希望能够使用列式表，而不是我们目前支持的传统行式表。我们已经有了 table access method API 的概念，但它还不够通用，无法允许用户创建列式表。但我认为人们仍然对这个概念非常感兴趣，他们会继续朝着这个方向努力。也许我们最终能够实现这个目标。</p>
+<p>除此之外，如果某些功能作为扩展运行良好，我个人并不赞成将其合并到核心代码中。我们用于核心代码开发的工程人员非常有限，不断扩大核心代码只会让我们的资源越来越紧张。我通常认为，如果某个功能作为扩展运行良好，那就应该保持扩展的形式。</p>
+<h2>AI 与 Postgres 社区</h2>
+<p><strong>Elizabeth:</strong> 这次采访我大部分时间都没怎么谈到人工智能，表现得还不错。如果能在晚宴上不聊人工智能，我会感到非常自豪。不过，我当然很好奇你们那边人工智能的发展情况。你们有没有采用什么人工智能编码工具或代码审查工具？</p>
+<p><strong>Tom:</strong> 就我个人而言，我用 Claude Code 做过几件小事，但我不能说我已经深入研究过它。</p>
+<p>整个社区仍在讨论我们是否要接受那些大部分由 AI 生成的投稿。就在几周前，我们举办了一次研讨会，几十位成员齐聚一堂，面对面地探讨了这个问题。我认为与会者的共识是：我们仍然希望有一个人为进入代码库的每一行内容背书，并能够解释其中的每一个决策——即使它部分由 AI 撰写。这目前还不是正式的项目政策。但我认为我们很快就会在更广泛的社区范围内进行讨论，并尝试制定某种标准化的政策。</p>
+<p>目前已经对我们的工作流程造成影响的一件事是，我们收到了大量的 AI 生成的 bug 报告和安全报告。其中很多都是后台正在运行的程序生成的。这确实是个问题，因为其中很多确实是我们需要修复的有效错误。但同时，由于工具对基本架构概念理解不足，也存在相当多的错误。希望这种情况能够有所改善。或者至少我们能够找到更有效的过滤方法。</p>
+<p><strong>Elizabeth:</strong> 我知道邮件列表目前有一些限制。所以据我所知，没有机器人会在邮件列表里发帖，但也许有，只是我不知道而已。你听说过非人类程序在 hackers 邮件列表里发帖吗——就是那个开发代码和大家交流的列表？</p>
+<p><strong>Tom:</strong> 我没有见到过任何可识别为那样的东西。确实有越来越多的人直接把 AI 生成的报告当作 bug 报告发上来之类的情况。但我还没看到任何看起来像是机器人订阅了邮件列表的情况。也许是我漏看了。</p>
+<h2>Tom 的开发环境</h2>
+<p><strong>Elizabeth:</strong> 跟我讲讲你本地的开发环境？</p>
+<p><strong>Tom:</strong> 我大部分工作都是在 Linux 服务器上用 Emacs 和命令行工具完成的。我实际用来打字的是一台 Mac 笔记本电脑，通过 SSH 和 X11 连接到服务器。这套配置是我几年前开始用的，因为我当时的人体工学问题非常严重。我需要一种可以把手放在腿上的设备。所以笔记本电脑放在腿上——我的手就放在腿上——然后我看着面前一个足够大的独立屏幕工作。</p>
+<p><strong>Elizabeth:</strong> 你用的是哪个 Linux 发行版？</p>
+<p><strong>Tom:</strong> 我多年前在 Red Hat 工作过，所以我至今主要用 RHEL。服务器现在跑的是 RHEL 10，另外我手边还有几台 Fedora 机器。</p>
+<p><strong>Elizabeth:</strong> 你有没有选择 Alma Linux 之类的新 Linux 发行版，也就是 CentOS 之后的新型 Linux 发行版？</p>
+<p><strong>Tom:</strong> 没有，没有。我实际上是付费订阅红帽公司的服务。我仍然相信他们正在做的事情，我认为他们应该得到支持。</p>
+<h2>结语</h2>
+<p><strong>Elizabeth:</strong> 你接下来有什么打算？除了在 Postgres 工作之外，你还有其他计划吗？</p>
+<p><strong>Tom:</strong> 不，没有。我想我会一直做 Postgres，直到我对这个项目感到厌倦，或者意识到自己过时为止。我不知道这些事情什么时候会发生，也不知道会不会发生，但就目前而言，我很满足于继续做我正在做的事情。</p>
+<p><strong>Elizabeth:</strong> 非常感谢你今天来到这里，Tom。我真的非常感激。我们曾在几家不同的公司共事过，我对这个项目有一种特殊的感情。非常感谢你今天参加访谈，也感谢你为这个项目所做的所有工作。</p>
+<p><strong>Tom:</strong> 也非常感谢你们邀请我。这次来很开心。</p>
+<hr>
+<blockquote>
+<p>原文：<a href="https://www.snowflake.com/en/blog/engineering/30-years-of-postgres-architecture-tom-lane/" rel="nofollow">Tom Lane on the Architectural Decisions That Shaped 30 Years of Postgres</a> — Snowflake Engineering Blog</p>
+</blockquote></div>
+<div style="font-size:small;margin-top:8px;float:right;">❤️ 转载文章请注明出处，谢谢！❤️</div>
+
+
+<nav class="postNav">
+    
+    <a href="/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html">
+        <span class="nav-label">&larr; 上一篇</span>
+        <span class="nav-title">深入理解 PostgreSQL Memory Context (2)</span>
+    </a>
+    
+    
+</nav>
+
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://pg-internal.com">PG Internal</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if("12/07/2024"!=""){
+    var startSite=new Date("12/07/2024");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行"+diffDay+"天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek main https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","swrd/swrd.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+// Image lightbox
+document.querySelectorAll('#postBody img').forEach(img => {
+    img.addEventListener('click', (e) => {
+        if (e.target.closest('a')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        const imgEl = document.createElement('img');
+        imgEl.src = img.src;
+        imgEl.alt = img.alt || '';
+        overlay.appendChild(imgEl);
+        overlay.addEventListener('click', () => { overlay.remove(); });
+        const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(overlay);
+    });
+});
+
+</script>
+<script src='/assets/GmeekTocBot.js' defer></script>
+
+</html>
