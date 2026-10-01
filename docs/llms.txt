@@ -2,10 +2,11 @@
 
 > PostgreSQL 数据库技术博客，专注于源码分析、性能优化和运维实战
 
-本站当前共 12 篇文章，主题标签包括：源码解析、memory context、ring buffer、buffer usage、buffer pin、新版本特性、PG18、wal_log_hints、pg_rewind、参数解析、autovacuum_naptime、maintenance_work_mem、vacuum、故障处理、PG原理、index only scan、SQL优化。文章按置顶与发布时间从新到旧排列，如需引用或转载请注明出处。
+本站当前共 13 篇文章，主题标签包括：访谈、源码解析、memory context、ring buffer、buffer usage、buffer pin、新版本特性、PG18、wal_log_hints、pg_rewind、参数解析、autovacuum_naptime、maintenance_work_mem、vacuum、故障处理、PG原理、index only scan、SQL优化。文章按置顶与发布时间从新到旧排列，如需引用或转载请注明出处。
 
 ## 文章
 
+- [Tom Lane 谈塑造 Postgres 三十年架构的那些决策](https://pg-internal.com/post/Tom-Lane-tan-su-zao-Postgres-san-shi-nian-jia-gou-de-na-xie-jue-ce.html): 探索 Postgres 30 年的架构历程——与核心 committer Tom Lane 对话，聊聊进程隔离、MVCC、write-ahead logging（WAL）与线程。（访谈，2026-09-15）
 - [深入理解 PostgreSQL Memory Context (2)](https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-2.html): 七、超大内存分配策略 7.1 要点 AllocSet 的 maxBlockSize (8MB) 并不是单次分配的上限。（源码解析、memory context，2026-04-20）
 - [深入理解 PostgreSQL Memory Context (1)](https://pg-internal.com/post/shen-ru-li-jie-PostgreSQL-Memory-Context-1.html): 之前分析了pg的共享缓存管理原理，这次分析一下私有内存的管理：memory context。（源码解析、memory context，2026-04-20）
 - [PostgreSQL Ring  Buffer 机制详解](https://pg-internal.com/post/PostgreSQL-Ring-Buffer-ji-zhi-xiang-jie.html): 1. 概述 1.1 什么是 Buffer Ring PostgreSQL 的 Ring Buffer 是一种后端私有的缓冲区访问策略（Buffer Access Strategy），用于优化特定场景下的缓冲区使用。（源码解析、ring buffer，2026-02-03）
